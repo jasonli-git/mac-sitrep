@@ -1,2 +1,2 @@
-# mac-sitrep
+# MacSitrep
 
