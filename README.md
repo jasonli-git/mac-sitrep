@@ -3,11 +3,13 @@
 A macOS observability and resource-accountability tool. It measures what software
 actually costs to run, and publishes those measurements.
 
-Steam requires developers to publish system requirements, and those requirements
-are guesses. mac-sitrep profiles a workload across repeated runs and generates a
-requirements block your project can commit — measured, reproducible, and
-verifiable in CI. It holds itself to the same rule: a tool that reports the cost
-of other software discloses its own.
+Steam is moving the same direction: its Framerate Estimator, in beta, predicts a
+game's FPS on *your* hardware from measured player telemetry rather than from the
+minimum and recommended specs a developer typed in by hand. mac-sitrep applies
+that philosophy at the source. It profiles a workload across repeated runs and
+generates a requirements block your project can commit — measured, reproducible,
+and verifiable in CI. It holds itself to the same rule: a tool that reports the
+cost of other software discloses its own.
 
 It runs **entirely unprivileged**. No root daemon, no privileged helper, no
 kernel extension. Metrics that would require root are omitted and disclosed

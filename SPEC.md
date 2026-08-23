@@ -21,11 +21,32 @@ It answers four questions:
 3. **How much does this software actually cost to run?**
 4. **What should happen if it exceeds its limits?**
 
-The organizing idea is **resource transparency**. Steam requires developers to
-publish system requirements; those requirements are guesses. mac-sitrep lets a
-project publish requirements *measured from real executions* — and holds itself
-to the same rule. A tool that measures the cost of other software must disclose
-its own.
+The organizing idea is **resource transparency**, and Steam is the closest
+existing model — not as a counterexample, but as a project moving the same
+direction.
+
+Steam has long required developers to declare minimum and recommended specs,
+which are estimates written by the developer. Valve's **Framerate Estimator**,
+in beta on SteamOS devices as of 2026, replaces that with prediction from
+measured data: anonymized opt-in telemetry from players on comparable hardware,
+rendered as an expected-FPS chart against the specs of *your* machine. The shift
+is from a declared guess to a measurement.
+
+mac-sitrep mirrors that philosophy from the opposite vantage point. Steam
+measures from the player fleet, after release, and aggregates across machines to
+predict for a hardware class. mac-sitrep measures at the source, during
+development, on the machine that ran the workload — and deliberately does not
+generalize across hardware (see non-goals). The two are complements: fleet-side
+prediction and source-side disclosure, both replacing an estimate with a number
+somebody actually recorded.
+
+Both also have to be honest about what the measurement cannot control for.
+Steam's estimator cannot account for in-game graphics settings or background
+load. mac-sitrep's equivalents are the scenario definition, the contention flag,
+and the recorded thermal state — the same problem, named rather than hidden.
+
+And mac-sitrep holds itself to the rule it applies to others. A tool that
+measures the cost of other software must disclose its own.
 
 ---
 
@@ -338,7 +359,7 @@ scope permanently.
 | **A native iPhone app** | The mobile web dashboard over Tailscale is sufficient. |
 | **Public-facing network endpoints** | Tailscale is the network boundary. Nothing binds to a public interface. |
 | **Continuous AI analysis of telemetry** | Principles 2 and 3, and it would destroy the $0 cost model. |
-| **Cross-machine requirement normalization** | Profiles record the machine they were measured on. Predicting an M1 8 GB result from an M4 16 GB run is out of scope; the machine is reported, not abstracted away. |
+| **Cross-machine requirement normalization** | Profiles record the machine they were measured on. Predicting an M1 8 GB result from an M4 16 GB run is out of scope; the machine is reported, not abstracted away. This is the deliberate divergence from Steam's Framerate Estimator, which predicts across a hardware class by aggregating fleet telemetry. That requires a fleet. A single-machine tool that extrapolated from one sample would be publishing a guess with a measurement's authority — the exact failure this project exists to avoid. |
 | **Windows or Linux support** | The entire value is in macOS-specific instrumentation. |
 
 ---
