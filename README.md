@@ -1,4 +1,4 @@
-# mac-sitrep
+# MacSitrep
 
 A macOS observability and resource-accountability tool. It measures what software
 actually costs to run, and publishes those measurements.
