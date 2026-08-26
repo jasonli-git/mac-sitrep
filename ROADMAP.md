@@ -36,4 +36,38 @@ baselines rather than guesses.
 - Mobile web dashboard over Tailscale, with confirmation on destructive actions
 - Optional AI explanation layer, provider-independent, with payload redaction and
   `explain --dry-run`
+- **API cost accounting** — external API spend as a first-class footprint
+  dimension: a reporting protocol the profiled workload writes token counts to, a
+  date-stamped pricing table, and cost fields in the profile artifact. Closes a
+  gap in the current definition of "footprint", which covers RAM, CPU, and disk
+  but not the bill. Also required by principle 6 — mac-sitrep's own AI layer
+  currently declares an API cost it does not measure. Network-level and proxy
+  capture are both rejected: per-process network I/O needs root, TLS hides tokens
+  from byte counts regardless, and intercepting credentialed traffic contradicts
+  the local-telemetry principle. The workload declares what the OS cannot see,
+  the same pattern as external-service attribution (ARCHITECTURE #10).
+- **Time-to-ready measurement** — launch to serving, distinct from total runtime.
+  Requires a readiness signal from the workload. Prerequisite for deployment
+  estimation, since cold start is what decides whether scale-to-zero hosting is
+  usable
+- **Deployment fit and cost estimation** — given a measured local envelope, which
+  *hosting shapes* fit and what they cost: scale-to-zero containers priced by
+  GB-second, always-on instances priced by the hour, serverless functions, and
+  GPU instances. Shape matters more than instance size for the target use case —
+  a live demo is idle-dominated, so an always-on box bills continuously while
+  scale-to-zero bills almost nothing until someone visits. Peak physical
+  footprint is the binding input for GB-second pricing; time to ready decides
+  whether scale-to-zero is viable at all. Scoped as *fit and price* only —
+  performance prediction is a permanent non-goal in [SPEC.md](SPEC.md).
+  "Do not deploy this" must be a supported answer. Depends on API cost
+  accounting, time-to-ready, and on local profiles being trustworthy first.
+- **Break-even analysis** — combining local, API, and deployment costs into the
+  run rate at which local execution stops being the cheaper option
 - Menu-bar status indicator
+
+Two constraints on the cost work, recorded so they are not rediscovered later:
+pricing tables ship as dated data files updated by an explicit command, never
+auto-fetched, since background fetching would break the zero-external-dependency
+principle. And coverage stays small and accurate — roughly a dozen curated
+instance families with a staleness warning — rather than a large table that
+silently goes out of date.

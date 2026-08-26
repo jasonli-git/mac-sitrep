@@ -48,6 +48,20 @@ and the recorded thermal state — the same problem, named rather than hidden.
 And mac-sitrep holds itself to the rule it applies to others. A tool that
 measures the cost of other software must disclose its own.
 
+### Two horizons
+
+The immediate purpose is local: measure what this machine's projects actually
+consume while they run here. That is the whole of v1, and everything else is
+built on it being trustworthy first.
+
+The longer purpose is that those local measurements are the input to a question
+that has to be answered later — what these projects will cost to host when they
+move to live demos on a domain. A measured local envelope plus published hosting
+prices gives a real answer to that; a guess does not. This is why the local
+measurement layer is specified so strictly. A deployment estimate inherits every
+weakness of the profile it was derived from, so the profile has to be worth
+inheriting.
+
 ---
 
 ## Core principles
@@ -58,7 +72,7 @@ measures the cost of other software must disclose its own.
 | 2 | **AI is optional** | An external model is called only when natural language adds value, never in the monitoring path. |
 | 3 | **Deterministic first** | The system decides *whether* something is wrong. AI only explains it. |
 | 4 | **Measure, don't guess** | Requirements come from real profiling runs, never from developer estimates. |
-| 5 | **Software should disclose its footprint** | Any project can publish measured requirements. |
+| 5 | **Software should disclose its footprint** | Any project can publish measured requirements. Footprint means the full cost of running the software — local compute, external API spend, and what it would cost hosted — not just RAM. |
 | 6 | **mac-sitrep must disclose its own footprint** | The monitor is subject to every rule it applies to others, including its own resource budget. |
 | 7 | **Observe before enforcing** | Workloads get warned, throttled, and asked to stop before they are killed. |
 | 8 | **Remote, but secure** | Tailscale provides the private network. SSH stays as administrative fallback, never a dependency. |
@@ -116,6 +130,28 @@ as physical footprint at no additional cost.
 
 `sitrep doctor` lists both what is available and what is not, with the reason.
 Silent omissions are a defect.
+
+### Cost
+
+Compute is only part of what software costs to run. Two further dimensions are
+in scope, both derived from measurements rather than estimates.
+
+**External API spend.** Token counts and the resulting cost, attributed to a
+profiling run. This cannot be observed from outside the process: per-process
+network I/O requires root, and TLS hides tokens from byte counts regardless.
+Intercepting the workload's credentialed traffic through a local proxy would
+contradict principle 12. So the workload reports it — the same pattern as
+declaring external services for attribution. A project that does not instrument
+gets no cost data, and its profile says so rather than reporting zero.
+
+Prices change, so every cost figure records the **dated pricing table** that
+produced it. A cost is reproducible only if the prices behind it are known,
+exactly as a RAM figure is meaningful only alongside the machine that produced
+it.
+
+**Time to ready.** How long the workload takes from launch to serving. Measured
+locally, this is the single best predictor of whether a scale-to-zero deployment
+will feel responsive or broken, and it is unavailable from a runtime average.
 
 ---
 
@@ -207,6 +243,47 @@ requirements actionable rather than decorative:
 sitrep can-i-run AI-PKS
 → 6.2 GB available; AI-PKS needs 9.7 GB peak. This will swap.
 ```
+
+---
+
+## Deployment estimation
+
+The same primitive aimed at rented hardware instead of this Mac: given a measured
+local envelope, what would it cost to host, and in what shape.
+
+**Fit and price, never performance prediction.** mac-sitrep may report that a
+workload's measured footprint fits inside an instance's published specification,
+and what that instance costs. It may not report how fast the workload will run
+there. Equal memory does not imply equal speed, and Apple Silicon's unified
+memory has no honest equivalent on x86 or CPU-only hardware — least of all for
+local inference, the workload class this project exists to measure. Every input
+to a deployment estimate is either a local measurement or a published price.
+Nothing is extrapolated.
+
+**Hosting shape matters more than instance size.** A live demo is idle-dominated:
+it is reachable continuously and used rarely. That inverts the usual arithmetic,
+because an always-on instance costs the same whether or not anyone visits, while
+scale-to-zero hosting costs almost nothing until someone does.
+
+| Shape | Priced by | Wins when |
+|-------|-----------|-----------|
+| Scale-to-zero container | GB-second plus requests | Idle-dominated demos — the common case here |
+| Always-on instance | Per hour, regardless of use | Sustained load, or when cold start is intolerable |
+| Serverless function | GB-second, with tight size and duration limits | Small, fast, stateless workloads |
+| GPU instance | Per hour, expensively | Workloads that genuinely require one |
+
+Peak physical footprint is the binding input for the cheap shapes, since
+GB-second pricing multiplies memory by time directly. Time to ready determines
+whether scale-to-zero is usable at all.
+
+**"Do not deploy this" is a valid answer**, and often the correct one for local
+inference. A workload needing 9.7 GB resident and eighteen seconds to load a
+model is not a cheap live demo on any shape. Reporting that plainly is more
+useful than producing a number that makes it look feasible.
+
+Estimates combine with measured API spend into the question actually worth
+answering — at what usage rate does hosting stop being cheaper than running it
+locally.
 
 ---
 
@@ -360,6 +437,9 @@ scope permanently.
 | **Public-facing network endpoints** | Tailscale is the network boundary. Nothing binds to a public interface. |
 | **Continuous AI analysis of telemetry** | Principles 2 and 3, and it would destroy the $0 cost model. |
 | **Cross-machine requirement normalization** | Profiles record the machine they were measured on. Predicting an M1 8 GB result from an M4 16 GB run is out of scope; the machine is reported, not abstracted away. This is the deliberate divergence from Steam's Framerate Estimator, which predicts across a hardware class by aggregating fleet telemetry. That requires a fleet. A single-machine tool that extrapolated from one sample would be publishing a guess with a measurement's authority — the exact failure this project exists to avoid. |
+| **Deployment performance prediction** | Permanent, and the line most likely to erode under pressure to be more useful. mac-sitrep may report that a measured footprint *fits* a given instance and what that instance *costs*. It may never report how fast the workload will run there. Fit and price are arithmetic over a local measurement and a published price; throughput on unseen hardware is a guess, and dressing it in a measurement's authority is the failure this project exists to avoid. Corollary: no benchmark scores, no "equivalent to" hardware mappings, no synthetic performance indices. |
+| **Auto-fetching cloud or model pricing** | Permanent. Pricing ships as dated data files updated by an explicit command. Background fetching would break principle 1 and put a network dependency in a tool that promises not to have one. A stale table that says it is stale beats a fresh one that phones home. |
+| **Cost optimization advice** | Reporting what something costs is in scope. Recommending architectures, negotiating reserved instances, or advising on spend is not — that is consulting, and it is where a measurement tool starts guessing again. |
 | **Windows or Linux support** | The entire value is in macOS-specific instrumentation. |
 
 ---
@@ -376,3 +456,9 @@ mac-sitrep is working when:
    by the machine getting slow.
 4. mac-sitrep's own published footprint is real, measured by itself, and within
    its declared budget — or the budget was corrected in public.
+5. A hosting decision was made from measured numbers rather than a guess: a
+   project went to a live demo on a shape chosen from its measured envelope, and
+   the bill matched the estimate for the traffic it actually received. The
+   negative result counts equally — a workload mac-sitrep said would not host
+   cheaply, kept local on that basis, rather than discovered to be expensive
+   after a month of billing.
