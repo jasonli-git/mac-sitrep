@@ -93,20 +93,70 @@ Tests:
   figures describe the primary device rather than a total. Correct for this Mac;
   revisit as per-service reporting if a second GPU ever matters.
 
-## Milestone 2 — Live snapshot ⬜
+## Milestone 2 — Live snapshot ✅
 
-- [ ] `Model/Sample.swift` — one typed system sample: memory, swap, pressure,
-      CPU, GPU, thermal, disk, network
-- [ ] `Sampling/SystemSampler.swift` — composes the Support readers into a
-      `Sample`, computing CPU utilization from a tick delta over an interval
-- [ ] `Sampling/ProcessSampler.swift` — per-process rows sorted by physical
-      footprint, with process-tree parentage
-- [ ] `sitrep` default subcommand — current status, replacing `doctor` as the
-      default
-- [ ] `sitrep processes` — top consumers, `--limit`
-- [ ] `--json` on both
-- [ ] Tests: utilization sums to ~100% across states, footprint ordering is
-      stable, a known process (self) appears with a plausible footprint
+Deliverable: `sitrep` shows current system state and `sitrep processes` shows top
+consumers, both with `--json`.
+
+The shaping constraint: **CPU, disk I/O, network I/O, and swap are cumulative
+counters since boot.** A single read of any of them gives an average over machine
+uptime, which is worthless as a "right now" figure. Every one needs two reads
+separated by an interval. That forces a split between a cheap instantaneous
+*reading* and a derived *sample* carrying rates — and that split is exactly what
+the daemon needs in Milestone 3, where it holds the previous reading in memory
+and deltas continuously instead of sleeping.
+
+- [x] `Model/ThermalState.swift` — shared thermal enum; refactor
+      `CapabilityRegistry` to use it instead of an inline string array
+- [x] `Model/Sample.swift` — `SystemReading` (instantaneous, cumulative counters)
+      and `Sample` (derived, carries rates), with sub-structs per subsystem
+- [x] `Model/ProcessSample.swift` — per-process reading and derived sample
+- [x] `Model/HealthState.swift` — 🟢/🟡/🔴 from explicit named thresholds
+- [x] `Sampling/SystemSampler.swift` — `read()` for the daemon, plus
+      `sample(interval:)` convenience for one-shot CLI use
+- [x] `Sampling/ProcessSampler.swift` — two reads to derive per-process CPU;
+      must report how many processes were unreadable, not silently show fewer
+- [x] `sitrep` status as the default subcommand, replacing `doctor`
+- [x] `sitrep processes` — `--limit`, `--sort ram|cpu`
+- [x] `--json` and `--interval` on both
+- [x] Tests: CPU fractions sum to ~1, rates are non-negative, self appears in the
+      process list with a plausible footprint, unreadable count is disclosed,
+      health thresholds classify correctly at their boundaries
+
+- Note: total memory was initially summed from page buckets and read 15 GB on a
+  16 GB Mac — `host_statistics64` tracks speculative and purgeable pages outside
+  those five categories. Now reads `hw.memsize`. Every derived percentage was
+  inflated ~6% until this was caught by comparing against the machine's actual
+  spec.
+- Note: reported "memory used" is intentionally ~4 GB lower than `top`'s. `top`
+  counts reclaimable cache; we do not (ARCHITECTURE #18). Cross-checked against
+  `top -l 1` — wired and compressor matched exactly, only the definition
+  differed. Anyone comparing the two will need this explained.
+- Note: no `--watch` mode. SPEC §20 wants a status display that updates in place
+  rather than reprinting. Deferred deliberately: once the daemon exists, watch
+  should read from it rather than re-sampling per frame, so building it now would
+  mean building it twice.
+- Note: local AI workload recognition (SPEC §3 — tagging Ollama, LM Studio, MLX
+  in the process list) is not here. It belongs with attribution in Milestone 4,
+  which needs the same process-matching rules.
+- Note: `sitrep processes` accounts for only readable processes, so its memory
+  total sits far below the machine's. Not fixable without root; the unreadable
+  count is disclosed on every run.
+
+## Milestone 3 — History and self-observability ⬜
+
+- [ ] `Storage/Database.swift` — SQLite with WAL, batched writes
+- [ ] `Storage/Rollup.swift` — 48 h raw / 30 d minute / 1 y hourly retention
+- [ ] `Sources/sitrepd` — LaunchAgent target, adaptive 10 s/1 s cadence,
+      background QoS
+- [ ] Daemon holds the previous `SystemReading` and deltas per tick without
+      sleeping — the reason for the M2 reading/sample split
+- [ ] Health-state hysteresis, now that history exists
+- [ ] Daemon self-sampling against the 100 MB / 2% budget, including the
+      sustained CPU figure a one-shot CLI cannot measure
+- [ ] `pmset -g log` parsing for sleep/wake/reboot markers, which the M1 probe
+      only checked for reachability
+- [ ] CLI↔daemon Unix socket in Application Support
 
 ## Parked / needs user input
 

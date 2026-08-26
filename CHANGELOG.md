@@ -3,6 +3,38 @@
 All notable changes to mac-sitrep. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.3.0] — 2026-08-26
+
+### Added
+
+- **Milestone 2** — live snapshot: `sitrep` (now the default subcommand) reports
+  current memory, swap, pressure, CPU, GPU, thermal state, disk, and network,
+  rolled up to a 🟢/🟡/🔴 health state that names the specific conditions behind
+  its verdict rather than just asserting one. `sitrep processes` lists top
+  consumers by physical footprint or CPU, with `--limit` and `--sort`.
+- A split between `SystemReading` (instantaneous, carrying cumulative counters)
+  and `Sample` (derived, carrying per-second rates). CPU ticks, disk and network
+  byte totals, and swap counters are all cumulative since boot, so a rate needs
+  two readings and the time between them. The CLI takes two readings 500 ms
+  apart; the daemon in Milestone 3 will hold the previous reading and delta on
+  each tick without sleeping. Both use the same types.
+- `HealthState` with thresholds as named constants, classifying from a single
+  sample. Explicitly without hysteresis, which needs history and arrives with the
+  daemon.
+- `ThermalState` as a shared enum, replacing an inline string array in
+  `CapabilityRegistry`.
+- `sitrep processes` always reports how many processes could not be read without
+  root — 284 of ~800 on a typical Mac. A top-N list that silently omitted
+  root-owned processes would misattribute the machine's memory.
+- `--json` and `--interval` on both commands; 61 tests across ten suites.
+
+### Fixed
+
+- Total memory reads `hw.memsize` rather than summing page buckets, which
+  under-reported a 16 GB Mac as 15 GB and inflated every derived percentage by
+  roughly 6%. `host_statistics64` tracks speculative and purgeable pages outside
+  the five categories that were being summed.
+
 ## [0.2.0] — 2026-08-26
 
 ### Added

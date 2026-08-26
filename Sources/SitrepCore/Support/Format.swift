@@ -37,4 +37,11 @@ public enum Format {
     public static func percent(_ fraction: Double) -> String {
         String(format: "%.1f%%", fraction * 100)
     }
+
+    /// A byte rate, e.g. `1.4 MB/s`. Exactly zero renders as `idle` rather than
+    /// `0 B/s`, since a column of zeroes is harder to scan than a word.
+    public static func rate(_ bytesPerSecond: Double) -> String {
+        guard bytesPerSecond >= 1 else { return "idle" }
+        return "\(bytes(UInt64(bytesPerSecond)))/s"
+    }
 }

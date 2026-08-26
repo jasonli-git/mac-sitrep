@@ -1,6 +1,6 @@
 # mac-sitrep — Roadmap
 
-Milestone 1 is complete as of 2026-08-26. A milestone is done when its capability
+Milestone 2 is complete as of 2026-08-26. A milestone is done when its capability
 works end to end, `swift build` and `swift test` both pass, the six project
 documents reflect what actually exists, and the user has reviewed it.
 
@@ -16,7 +16,7 @@ baselines rather than guesses.
 |---|--------|-------------|
 | 0 | ✅ done | **Scaffolding** — SwiftPM package, `SitrepCore`/`sitrep` split, sysctl bridge, machine identity, `sitrep version` health check, 9 passing tests, project docs |
 | 1 | ✅ done | **Capability disclosure** — `sitrep doctor`: 21 probes each attempting a real read, reporting available-with-sample or unavailable-with-reason; self-budget check; `--json`; non-zero exit on unexpected probe failure; 36 tests |
-| 2 | ⬜ planned | **Live snapshot** — `sitrep` and `sitrep processes`: system + per-process state from `host_statistics64`, `proc_pid_rusage`, IOKit GPU/disk, `NET_RT_IFLIST2`; `--json` on both |
+| 2 | ✅ done | **Live snapshot** — `sitrep` status with health state and reasons, `sitrep processes` sorted by memory or CPU; reading/sample split deriving per-second rates from cumulative counters; unreadable-process count disclosed; `--json` and `--interval` on both; 61 tests |
 | 3 | ⬜ planned | **History and self-observability** — `sitrepd` LaunchAgent, SQLite store with retention tiers, adaptive 10 s/1 s cadence, daemon measuring itself against its declared budget |
 | 4 | ⬜ planned | **Workload profiling** — `sitrep run --project X -- cmd`: project config, own-tree + external-service delta attribution, five runs to median/range, overhead subtraction, JSON artifact |
 | 5 | ⬜ planned | **Publishing** — `sitrep export --inject` with marker-scoped README replacement and a `--check` drift gate, shields.io badge JSON, `sitrep compare`, `sitrep can-i-run` |

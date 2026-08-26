@@ -150,10 +150,7 @@ public enum CapabilityRegistry {
             category: .thermal,
             source: "ProcessInfo.processInfo.thermalState"
         ) {
-            let names = ["nominal", "fair", "serious", "critical"]
-            let raw = ProcessInfo.processInfo.thermalState.rawValue
-            let label = names.indices.contains(raw) ? names[raw] : "unknown(\(raw))"
-            return .available(sample: label)
+            .available(sample: ThermalState.current().rawValue)
         },
 
         CapabilityProbe(

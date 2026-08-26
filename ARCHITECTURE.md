@@ -53,10 +53,13 @@ never a participant in the sampling path, so it can be absent entirely.
 | 15 | The self-budget verdict tests **lifetime peak** footprint, not instantaneous | A process that spiked to 400 MB and has since settled to 40 MB is not within a 100 MB budget; testing the instantaneous value would let it report compliance. `ri_lifetime_max_phys_footprint` makes the honest check as cheap as the dishonest one (#5). |
 | 16 | Page size comes from `sysconf(_SC_PAGESIZE)`, not the `vm_kernel_page_size` global | Swift 6 rejects the global as shared mutable state, but the substantive reason is correctness: the compile-time `PAGE_SIZE` constant reports 4 KB while Apple Silicon actually uses 16 KB pages. Since `host_statistics64` returns counts in pages, getting this wrong would divide every memory figure by four. A test asserts agreement with `hw.pagesize`. |
 | 17 | Qualifies #5 — a derived peak is `max(ri_lifetime_max_phys_footprint, observed samples)`, not the kernel field alone | #5 claimed the kernel's high-water mark was "strictly better than sampling for peak capture". That is too strong. The field is refreshed at task-accounting boundaries rather than synchronously with `ri_phys_footprint`, so during rapid growth it can read *lower* than the live footprint — caught by a test on an M4 reporting peak 4,800,824 against footprint 4,833,592. `Rusage` still returns raw kernel values; `SelfFootprint` and, later, the profiler take the max. Erring toward over-reporting is the safe direction for both a budget check and a published requirement. Had this gone unnoticed, Milestone 4 would have under-reported peak RAM in exactly the fast-allocating workloads the project exists to measure. |
+| 18 | Reported "memory used" is active + wired + compressed, deliberately smaller than `top`'s total − free | macOS has no authoritative "used" figure. `top` counts inactive and file-backed cache the kernel reclaims on demand, which reads ~15 GB on a 16 GB Mac and implies a crisis that is not happening; cross-checked against `top -l 1` during development, where the wired and compressor components matched exactly and only the definition differed. Excluding reclaimable pages makes this the better predictor of approaching swap, which is what the project cares about. Every component is reported separately so a reader wanting `top`'s definition can compute it. Cost: someone comparing to `top` will see a smaller number and may think the tool is wrong. |
+| 19 | Total memory comes from `hw.memsize`, not the sum of page buckets | Summing active + inactive + wired + compressed + free reported a 16 GB Mac as 15 GB, because `host_statistics64` also tracks speculative and purgeable pages outside those five categories. Every percentage derived from the total would have been inflated by ~6%. A regression test pins total to `hw.memsize` and asserts it is at least the bucket sum. |
+| 20 | Per-process CPU utilization is uncapped at 1.0; system-wide utilization is capped | They answer different questions. A process using four cores fully reports 4.0, matching `top`'s 400% convention and making a parallel workload visible at a glance. System-wide, a figure that could reach 1000% on a 10-core machine is more confusing than useful, so it is normalized to the machine. |
 
 ## Module Layout
 
-**Built** (Milestones 0–1):
+**Built** (Milestones 0–2):
 
 ```
 Package.swift                       # SwiftPM manifest; dependency policy comments
@@ -66,9 +69,15 @@ Sources/
     Model/
       Machine.swift                 # machine identity; embedded in every profile
       SelfFootprint.swift           # mac-sitrep's own cost + declared budget
+      ThermalState.swift            # shared thermal enum
+      Sample.swift                  # SystemReading (raw) + Sample (derived rates)
+      ProcessSample.swift           # ProcessReading, ProcessSample, ProcessSnapshot
+      HealthState.swift             # 🟢/🟡/🔴 from named thresholds
     Sampling/
       Capability.swift              # capability identity, status, typed reasons
       CapabilityRegistry.swift      # all 21 probes; the disclosure contract
+      SystemSampler.swift           # read() for the daemon, sample() for the CLI
+      ProcessSampler.swift          # per-process readings, derived CPU, sorting
     Support/
       Sysctl.swift                  # typed sysctlbyname(3) wrappers
       MachHost.swift                # host_statistics64, host_processor_info
@@ -81,14 +90,17 @@ Sources/
       Format.swift                  # byte/second/percent rendering at the edge
   sitrep/
     SitrepCommand.swift             # CLI root
+    StatusCommand.swift             # `sitrep` status rendering (default)
+    ProcessesCommand.swift          # `sitrep processes` table
     DoctorCommand.swift             # `sitrep doctor` rendering + exit code
 Tests/
   SitrepCoreTests/
     MachineTests.swift              # Machine + Sysctl suites
     CapabilityTests.swift           # registry, measurement sources, budget, format
+    SamplingTests.swift             # system + process sampling, health thresholds
 ```
 
-36 tests across seven suites.
+61 tests across ten suites.
 
 **Dependency rule.** `SitrepCore` imports only Darwin, Foundation, and IOKit —
 never `ArgumentParser`, never CLI concerns. Executable targets depend on
@@ -99,9 +111,6 @@ a future HTTP server to be added as peers rather than as forks of the CLI.
 
 ```
 SitrepCore/
-  Sampling/                         # M2 — typed samples over the Support layer
-    SystemSampler.swift             #   one Sample from all system sources
-    ProcessSampler.swift            #   per-process rows, CPU deltas
   Storage/                          # M3
     Database.swift                  #   SQLite, WAL, batched writes
     Rollup.swift                    #   retention tiers
@@ -170,6 +179,44 @@ Two exceptions to decision #1's no-subprocess rule: `pmset -g therm` and
 `pmset -g log` have no public API equivalent. Both are polled infrequently
 (thermal on state change, sleep/wake on daemon start and hourly), never in the
 sampling loop.
+
+## Sampling — built
+
+Two types, because the one-shot CLI and the daemon need different things from
+the same sources.
+
+```
+SystemSampler.read()  ──▶  SystemReading   (instantaneous; cumulative counters)
+                                │
+        two readings + elapsed  ▼
+                            Sample         (derived; carries per-second rates)
+                                │
+                                ▼
+                          HealthState      (🟢/🟡/🔴 + reasons)
+```
+
+CPU ticks, disk and network byte totals, and swap counters are all **cumulative
+since boot**. A single read of any of them yields an average over machine uptime,
+which is useless as a "right now" figure. `Sample.init(from:to:)` turns two
+readings and the elapsed time between them into rates.
+
+The CLI takes two readings 500 ms apart and discards the first, which is why
+`sitrep` blocks briefly and why `--interval` exists. The daemon (Milestone 3)
+will instead hold the previous reading in memory and delta on each tick, never
+sleeping — same types, no wasted wall-clock. That is the reason for the split;
+collapsing it into one "get a sample" call would force the daemon to sleep too.
+
+Counter deltas clamp at zero. The kernel's counters should only rise, but an
+interface disappearing between readings can make a total drop, and a negative
+rate would be nonsense rather than informative.
+
+`HealthState` classifies from a single sample with **no hysteresis**. That is
+correct for a one-shot command, which cannot flap, but insufficient for a
+continuously updating display: a value oscillating around a threshold would
+alternate states every tick. Hysteresis needs history and arrives with the
+daemon. Thresholds live in `HealthThresholds` as named constants — they are
+absolute values, and SPEC's position is that fixed thresholds are not enough, so
+learned per-project baselines replace most of them post-v1.
 
 ## Storage schema — designed
 
@@ -246,6 +293,17 @@ Writes are batched — the daemon buffers roughly 60 s of samples and flushes on
   so a fast-growing process can briefly report a peak below its current
   footprint. `Rusage` returns the raw field; every consumer must derive a peak
   with `max()`. Decision #17.
+- **Reported memory used will not match `top`.** Ours is smaller by the
+  reclaimable pages `top` counts — decision #18, not a bug. The components are
+  reported separately so the other definition is recomputable.
+- **`sitrep` and `sitrep processes` block for the sampling interval.**
+  Unavoidable for a one-shot rate; 500 ms by default, tunable with `--interval`.
+  Shorter intervals make CPU utilization noisy as scheduler quanta start to
+  dominate the tick delta.
+- **Process listings omit processes owned by other users.** Roughly 284 of ~800
+  on a typical Mac. The count is always disclosed, but it does mean the memory
+  total across listed processes is far below the machine's actual usage, and
+  `sitrep processes` cannot be used to account for all of RAM.
 - **`doctor` performs real I/O.** Probing is what makes the report trustworthy
   (#13), but it means the command reads sysctls, walks the IOKit registry,
   enumerates ~800 processes, and spawns `pmset`. It is cheap — roughly 30 ms and

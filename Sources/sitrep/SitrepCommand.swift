@@ -13,8 +13,8 @@ struct SitrepCommand: ParsableCommand {
         omitted and disclosed rather than silently dropped.
         """,
         version: SitrepVersion.current,
-        subcommands: [Doctor.self, Version.self],
-        defaultSubcommand: Doctor.self
+        subcommands: [Status.self, Processes.self, Doctor.self, Version.self],
+        defaultSubcommand: Status.self
     )
 }
 

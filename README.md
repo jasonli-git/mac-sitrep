@@ -20,13 +20,21 @@ For what it should do and why, see [SPEC.md](SPEC.md). For how it is built, see
 
 ## Status
 
-**v0.2.0 — Milestone 1 of 5 complete.** Capability disclosure works: the tool
-knows and reports what this Mac can and cannot measure. Live sampling begins in
-Milestone 2. See [ROADMAP.md](ROADMAP.md) for what is planned and
-[CHANGELOG.md](CHANGELOG.md) for what has shipped.
+**v0.3.0 — Milestone 2 of 5 complete.** Live measurement works: current system
+state, top process consumers, and honest reporting of what this Mac cannot
+measure. Background history and workload profiling are next. See
+[ROADMAP.md](ROADMAP.md) for what is planned and [CHANGELOG.md](CHANGELOG.md)
+for what has shipped.
 
 ## What works today
 
+- **`sitrep`** — current memory, swap, pressure, CPU, GPU, thermal state, disk,
+  and network, rolled up to a 🟢/🟡/🔴 health state that names the conditions
+  behind its verdict. Takes two readings a moment apart, since CPU and I/O
+  figures are cumulative counters that cannot yield a rate from one read.
+- **`sitrep processes`** — top consumers by physical footprint (Activity
+  Monitor's "Memory", not RSS) or CPU, with `--limit` and `--sort`. Always
+  reports how many processes could not be read without root.
 - **`sitrep doctor`** — reports all 21 metrics it knows how to look for: which
   are readable on this Mac (with a live sample value), and which are not (with
   the reason and the alternative to use instead). Each is established by
@@ -35,7 +43,30 @@ Milestone 2. See [ROADMAP.md](ROADMAP.md) for what is planned and
   metric that should work does not.
 - **`sitrep version`** — version plus machine identity, in text or `--json`.
 
-Example of the honest-gaps half of `doctor`:
+```
+$ sitrep
+🟢 HEALTHY
+
+MEMORY        11 GB / 16 GB         68.0% used
+  compressed  4.7 GB                wired 2.0 GB
+  swap        0 B used              no swap-out activity
+  pressure    normal
+
+CPU           7.9%                  10 cores · user 4.7% · sys 3.1%
+GPU           4.0%                  6.9 GB allocated
+THERMAL       nominal
+
+DISK          28 GB free            read idle · write idle
+NETWORK                             in idle · out idle
+```
+
+Two reporting choices worth knowing about. Memory *used* is active + wired +
+compressed, which runs several GB below what `top` shows — `top` counts cache the
+kernel reclaims on demand. And swap is judged on its **rate**, not the swap file
+size: macOS grows that file and never cleanly shrinks it, so a level-based
+zero-swap policy would read as permanently violated.
+
+`sitrep doctor` also reports what it *cannot* measure, and why:
 
 ```
 – thermal.temperature           CPU die temperature
@@ -47,8 +78,6 @@ Example of the honest-gaps half of `doctor`:
 Everything below is specified and designed but not yet built — see
 [ROADMAP.md](ROADMAP.md):
 
-- **`sitrep` / `sitrep processes`** — live system and per-process state, using
-  physical footprint rather than RSS
 - **`sitrepd`** — background sampling into a local SQLite history, measuring its
   own footprint against a declared budget
 - **`sitrep run --project X -- cmd`** — profile a workload across five runs,
@@ -77,7 +106,7 @@ sufficient — full Xcode is not needed).
 git clone https://github.com/jasonli-git/mac-sitrep.git
 cd mac-sitrep
 swift build
-swift run sitrep doctor
+swift run sitrep
 ```
 
 Run the test suite:
