@@ -48,10 +48,15 @@ never a participant in the sampling path, so it can be absent entirely.
 | 10 | Attribution is the wrapped process tree **plus declared external services measured by delta** | Naive tree attribution is wrong for exactly the workloads this project exists to measure: when a project calls Ollama or LM Studio, the model's memory lives in a pre-existing daemon outside the tree, so the wrapped client shows near-zero RAM. External services are declared per project and attributed by before/during/after delta. |
 | 11 | Profiles default to five runs and publish median with range | Peak RAM varies with thermal state, page-cache warmth, quantization, context length, and background load. A single sample is barely better than a guess, which would undercut SPEC principle 4. A contention flag records when other significant workloads were active. |
 | 12 | The policy engine ships dry-run and must be explicitly armed | Enforcement is the riskiest subsystem, and arming it against unvalidated baselines invites kill/restart loops. It logs `would have …` until `sitrep arm`. Recorded now so the posture is not relitigated when the subsystem is built in a later milestone. |
+| 13 | Capabilities are established by **probing** — attempting a real read — never by consulting a static table | A table of what ought to work is a claim, not a measurement, and SPEC principle 11 makes honest gaps a correctness property rather than a nicety. This paid for itself immediately: the first `memory.swap_rate` implementation named `vm.compressor.swapouts_pressure`, which does not exist (the real key has a `.swapper.` component). A static table would have shipped that error into published profiles silently. Cost: `doctor` does real I/O, so it is not free to run. |
+| 14 | System-wide network I/O reads `sysctl NET_RT_IFLIST2`, not `getifaddrs(3)` | The `if_data` struct `getifaddrs` returns carries **32-bit** byte counters that wrap every 4 GB — unusable for cumulative I/O in a monitoring tool, and a bug that only shows up after the machine has been up a while. `NET_RT_IFLIST2` returns `if_msghdr2`, whose embedded `if_data64` counters are 64-bit. Same source `netstat -ib` uses. Loopback is excluded via `IFF_LOOPBACK`, so local development traffic does not read as network load. |
+| 15 | The self-budget verdict tests **lifetime peak** footprint, not instantaneous | A process that spiked to 400 MB and has since settled to 40 MB is not within a 100 MB budget; testing the instantaneous value would let it report compliance. `ri_lifetime_max_phys_footprint` makes the honest check as cheap as the dishonest one (#5). |
+| 16 | Page size comes from `sysconf(_SC_PAGESIZE)`, not the `vm_kernel_page_size` global | Swift 6 rejects the global as shared mutable state, but the substantive reason is correctness: the compile-time `PAGE_SIZE` constant reports 4 KB while Apple Silicon actually uses 16 KB pages. Since `host_statistics64` returns counts in pages, getting this wrong would divide every memory figure by four. A test asserts agreement with `hw.pagesize`. |
+| 17 | Qualifies #5 — a derived peak is `max(ri_lifetime_max_phys_footprint, observed samples)`, not the kernel field alone | #5 claimed the kernel's high-water mark was "strictly better than sampling for peak capture". That is too strong. The field is refreshed at task-accounting boundaries rather than synchronously with `ri_phys_footprint`, so during rapid growth it can read *lower* than the live footprint — caught by a test on an M4 reporting peak 4,800,824 against footprint 4,833,592. `Rusage` still returns raw kernel values; `SelfFootprint` and, later, the profiler take the max. Erring toward over-reporting is the safe direction for both a budget check and a published requirement. Had this gone unnoticed, Milestone 4 would have under-reported peak RAM in exactly the fast-allocating workloads the project exists to measure. |
 
 ## Module Layout
 
-**Built** (Milestone 0):
+**Built** (Milestones 0–1):
 
 ```
 Package.swift                       # SwiftPM manifest; dependency policy comments
@@ -60,14 +65,30 @@ Sources/
     Version.swift                   # package version constant
     Model/
       Machine.swift                 # machine identity; embedded in every profile
+      SelfFootprint.swift           # mac-sitrep's own cost + declared budget
+    Sampling/
+      Capability.swift              # capability identity, status, typed reasons
+      CapabilityRegistry.swift      # all 21 probes; the disclosure contract
     Support/
       Sysctl.swift                  # typed sysctlbyname(3) wrappers
+      MachHost.swift                # host_statistics64, host_processor_info
+      Rusage.swift                  # proc_pid_rusage RUSAGE_INFO_V4
+      ProcessList.swift             # proc_listpids, proc_pidpath, ppid
+      IOKitRegistry.swift           # IOAccelerator, IOBlockStorageDriver
+      NetworkInterfaces.swift       # NET_RT_IFLIST2 64-bit counters
+      SwapUsage.swift               # vm.swapusage + pressure/compressor counters
+      CommandRunner.swift           # bounded subprocess; pmset only
+      Format.swift                  # byte/second/percent rendering at the edge
   sitrep/
-    SitrepCommand.swift             # CLI root + `version` health-check subcommand
+    SitrepCommand.swift             # CLI root
+    DoctorCommand.swift             # `sitrep doctor` rendering + exit code
 Tests/
   SitrepCoreTests/
-    MachineTests.swift              # Machine + Sysctl suites (9 tests)
+    MachineTests.swift              # Machine + Sysctl suites
+    CapabilityTests.swift           # registry, measurement sources, budget, format
 ```
+
+36 tests across seven suites.
 
 **Dependency rule.** `SitrepCore` imports only Darwin, Foundation, and IOKit —
 never `ArgumentParser`, never CLI concerns. Executable targets depend on
@@ -78,13 +99,9 @@ a future HTTP server to be added as peers rather than as forks of the CLI.
 
 ```
 SitrepCore/
-  Sampling/                         # M1–M2
-    Capability.swift                #   what this Mac can measure, and why not
-    SystemSampler.swift             #   host_statistics64, sysctl, thermalState
-    ProcessSampler.swift            #   proc_listpids + proc_pid_rusage(V4)
-    GPUSampler.swift                #   IOKit AGXAccelerator PerformanceStatistics
-    DiskSampler.swift               #   statfs + IOBlockStorageDriver
-    NetworkSampler.swift            #   getifaddrs / if_data64
+  Sampling/                         # M2 — typed samples over the Support layer
+    SystemSampler.swift             #   one Sample from all system sources
+    ProcessSampler.swift            #   per-process rows, CPU deltas
   Storage/                          # M3
     Database.swift                  #   SQLite, WAL, batched writes
     Rollup.swift                    #   retention tiers
@@ -105,7 +122,19 @@ Sources/sitrepd/                    # M3 — LaunchAgent daemon
 assuming a width: a key whose kernel width is neither 4 nor 8 bytes returns `nil`
 instead of a truncated or byte-swapped value. That is why
 `Sysctl.integer("vm.swapusage")` correctly declines — `vm.swapusage` is a struct,
-and is read properly in Milestone 2.
+and gets a purpose-built reader in `Support/SwapUsage.swift`.
+
+The rest of the access layer sits beside it in `Support/`: `MachHost` for Mach
+host statistics, `Rusage` for `proc_pid_rusage`, `ProcessList` for `libproc`
+enumeration, `IOKitRegistry` for registry property lookups, `NetworkInterfaces`
+for the route sysctl, and `SwapUsage` for the struct-valued swap keys. These are
+deliberately thin — they return kernel data, not derived metrics. Rates and
+utilization percentages need two reads over an interval and belong to the
+samplers in Milestone 2.
+
+`CommandRunner` is the quarantine for the one rule-breaking case. It exists so
+that subprocess use is visible in one file and has to be justified when a caller
+is added, rather than spreading quietly.
 
 `Model/Machine.swift` composes `hw.model`, `machdep.cpu.brand_string`,
 `hw.memsize`, `hw.logicalcpu`, and `kern.osversion` with Foundation's version
@@ -113,23 +142,24 @@ info. Individual fields degrade to `"unknown"` or a Foundation fallback rather
 than failing the read: an unidentifiable machine should still be measurable, and
 `sitrep doctor` surfaces the gap.
 
-## Capability disclosure — designed
+## Capability disclosure — built
 
-The following are confirmed readable **unprivileged** on `Mac16,10` (verified
-during design):
+Probed live by `sitrep doctor`. The following are confirmed readable
+**unprivileged** on `Mac16,10`, each verified by an actual read rather than by
+appearing in this table:
 
 | Metric | Source |
 |--------|--------|
 | Memory | `host_statistics64` / `HOST_VM_INFO64`; `sysctl vm.swapusage` |
 | Memory pressure | `kern.memorystatus_vm_pressure_level` (1 normal / 2 warn / 4 critical) |
-| Swap rate | `vm.compressor.swapouts_pressure`, `.swapins_pressure`, `.pages_swapped_pressure` |
+| Swap rate | `vm.compressor.swapper.swapouts_total`, `.swapins_total`, `.swapouts_pressure` |
 | CPU | `host_processor_info` / `PROCESSOR_CPU_LOAD_INFO` deltas |
 | Thermal | `ProcessInfo.thermalState`; `pmset -g therm` |
-| GPU | IOKit `AGXAccelerator` → `PerformanceStatistics` → `Device Utilization %`, `Alloc system memory` |
+| GPU | IOKit `IOAccelerator` → `PerformanceStatistics` → `Device Utilization %`, `Alloc system memory` |
 | Per process | `proc_pid_rusage(RUSAGE_INFO_V4)` — footprint, lifetime peak, disk I/O, CPU time |
 | Process tree | `proc_listpids` + `proc_bsdinfo.pbi_ppid`, `proc_pidpath` |
 | Disk | `statfs`; IOKit `IOBlockStorageDriver` → `Statistics` |
-| Network (system-wide) | `getifaddrs` + `if_data64` |
+| Network (system-wide) | `sysctl NET_RT_IFLIST2` → `if_msghdr2` (64-bit counters) |
 | Sleep/wake/reboot | `pmset -g log` |
 
 Unavailable without root, and reported as such by `sitrep doctor` rather than
@@ -200,3 +230,23 @@ Writes are batched — the daemon buffers roughly 60 s of samples and flushes on
 - **Machine identity degrades to `"unknown"` rather than failing.** A profile
   artifact from an unidentifiable machine is less useful but still valid; the
   alternative is refusing to measure at all.
+- **The `power.sleep_wake` probe checks reachability, not the read.** It confirms
+  `/usr/bin/pmset` is executable rather than running `pmset -g log`, whose output
+  is megabytes and which would make `doctor` slow and memory-hungry for no gain.
+  This is the one capability whose "available" is weaker than the others' — the
+  parse itself lands with the daemon in Milestone 3, and could fail then despite
+  probing clean now.
+- **`IOKitRegistry` reads the first matching service only.** On a Mac with more
+  than one accelerator or block device, GPU and disk figures describe the primary
+  one rather than the total. Correct for the single-GPU Apple Silicon target;
+  summing across services would double-count on machines with an internal and
+  external GPU, so the fix is per-service reporting rather than aggregation.
+- **The kernel's lifetime-peak footprint can lag the live value.**
+  `ri_lifetime_max_phys_footprint` is refreshed at task-accounting boundaries,
+  so a fast-growing process can briefly report a peak below its current
+  footprint. `Rusage` returns the raw field; every consumer must derive a peak
+  with `max()`. Decision #17.
+- **`doctor` performs real I/O.** Probing is what makes the report trustworthy
+  (#13), but it means the command reads sysctls, walks the IOKit registry,
+  enumerates ~800 processes, and spawns `pmset`. It is cheap — roughly 30 ms and
+  3 MB — but it is not free, and it is not something to call in a loop.

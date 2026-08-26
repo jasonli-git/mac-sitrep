@@ -20,23 +20,33 @@ For what it should do and why, see [SPEC.md](SPEC.md). For how it is built, see
 
 ## Status
 
-**v0.1.0 — Milestone 0 of 5 complete.** The package scaffold, sysctl bridge, and
-machine identity work; measurement itself begins in Milestone 1. See
-[ROADMAP.md](ROADMAP.md) for what is planned and [CHANGELOG.md](CHANGELOG.md)
-for what has shipped.
+**v0.2.0 — Milestone 1 of 5 complete.** Capability disclosure works: the tool
+knows and reports what this Mac can and cannot measure. Live sampling begins in
+Milestone 2. See [ROADMAP.md](ROADMAP.md) for what is planned and
+[CHANGELOG.md](CHANGELOG.md) for what has shipped.
 
 ## What works today
 
-- **`sitrep version`** — prints the version and identifies the machine
-  (hardware model, CPU, RAM, cores, macOS version and build), in text or
-  `--json`. This is the scaffold's health check, exercising the CLI, core
-  library, and sysctl bridge in one command.
+- **`sitrep doctor`** — reports all 21 metrics it knows how to look for: which
+  are readable on this Mac (with a live sample value), and which are not (with
+  the reason and the alternative to use instead). Each is established by
+  attempting a real read, never by consulting a table. Add `--gaps-only` to see
+  just the limitations, or `--json` to script against it. Exits non-zero if a
+  metric that should work does not.
+- **`sitrep version`** — version plus machine identity, in text or `--json`.
+
+Example of the honest-gaps half of `doctor`:
+
+```
+– thermal.temperature           CPU die temperature
+    SMC access requires root or private frameworks. mac-sitrep never
+    uses root by design, so this is declined rather than unavailable.
+    → use thermal.state instead
+```
 
 Everything below is specified and designed but not yet built — see
 [ROADMAP.md](ROADMAP.md):
 
-- **`sitrep doctor`** — every sensor this Mac can read, and every one it cannot,
-  with the reason
 - **`sitrep` / `sitrep processes`** — live system and per-process state, using
   physical footprint rather than RSS
 - **`sitrepd`** — background sampling into a local SQLite history, measuring its
@@ -67,7 +77,7 @@ sufficient — full Xcode is not needed).
 git clone https://github.com/jasonli-git/mac-sitrep.git
 cd mac-sitrep
 swift build
-swift run sitrep version
+swift run sitrep doctor
 ```
 
 Run the test suite:
