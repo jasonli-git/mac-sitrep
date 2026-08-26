@@ -6,10 +6,9 @@ import PackageDescription
 let package = Package(
     name: "mac-sitrep",
     platforms: [.macOS(.v14)],
-    // The `sitrepd` daemon target arrives with Milestone 3; declaring it now
-    // would ship an executable that does nothing.
     products: [
         .executable(name: "sitrep", targets: ["sitrep"]),
+        .executable(name: "sitrepd", targets: ["sitrepd"]),
         .library(name: "SitrepCore", targets: ["SitrepCore"]),
     ],
     dependencies: [
@@ -29,6 +28,10 @@ let package = Package(
                 "SitrepCore",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
             ]
+        ),
+        .executableTarget(
+            name: "sitrepd",
+            dependencies: ["SitrepCore"]
         ),
         .testTarget(
             name: "SitrepCoreTests",

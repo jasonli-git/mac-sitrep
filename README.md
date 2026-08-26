@@ -20,9 +20,9 @@ For what it should do and why, see [SPEC.md](SPEC.md). For how it is built, see
 
 ## Status
 
-**v0.3.0 — Milestone 2 of 5 complete.** Live measurement works: current system
-state, top process consumers, and honest reporting of what this Mac cannot
-measure. Background history and workload profiling are next. See
+**v0.4.0 — Milestone 3 of 5 complete.** Live measurement and background history
+both work: a collector records state continuously and reports what it costs to
+do so. Workload profiling is next. See
 [ROADMAP.md](ROADMAP.md) for what is planned and [CHANGELOG.md](CHANGELOG.md)
 for what has shipped.
 
@@ -35,6 +35,13 @@ for what has shipped.
 - **`sitrep processes`** — top consumers by physical footprint (Activity
   Monitor's "Memory", not RSS) or CPU, with `--limit` and `--sort`. Always
   reports how many processes could not be read without root.
+- **`sitrep daemon install`** — runs a background collector as a user
+  LaunchAgent. No root, no privileged helper, no password prompt. `uninstall`
+  and `status` do what they say; `status` reports what the collector has cost.
+- **`sitrep history --since 24h`** — what happened over a window: worst health
+  reached, memory and CPU averages and peaks, top consumers, events, and
+  mac-sitrep's own footprint. Reads the store directly, so it works whether or
+  not the collector is currently running.
 - **`sitrep doctor`** — reports all 21 metrics it knows how to look for: which
   are readable on this Mac (with a live sample value), and which are not (with
   the reason and the alternative to use instead). Each is established by
@@ -75,11 +82,13 @@ zero-swap policy would read as permanently violated.
     → use thermal.state instead
 ```
 
+Measured over a 45-second collector run on this machine: **4.1 MB peak
+footprint against its declared 100 MB budget, 0.0% CPU.** The tool holds itself
+to the rule it applies to everything else.
+
 Everything below is specified and designed but not yet built — see
 [ROADMAP.md](ROADMAP.md):
 
-- **`sitrepd`** — background sampling into a local SQLite history, measuring its
-  own footprint against a declared budget
 - **`sitrep run --project X -- cmd`** — profile a workload across five runs,
   attributing memory held by external services like Ollama or LM Studio
 - **`sitrep export --inject README.md`** — write a measured requirements block

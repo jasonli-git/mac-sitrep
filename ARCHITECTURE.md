@@ -19,8 +19,9 @@ daemon.
   directory for local history; committed JSON artifacts in each profiled
   project's repo for published requirements.
 - **Boundaries** — `SitrepCore` holds all measurement, storage, and rendering
-  logic and links no CLI code. `sitrep` (CLI) and, from Milestone 3, `sitrepd`
-  (daemon) are thin shells over it.
+  logic and links no CLI code. `sitrep` (CLI) and `sitrepd` (daemon) are thin
+  shells over it. They communicate only through the SQLite file: the daemon
+  writes, the CLI opens read-only. There is no IPC layer (decision #21).
 - **External dependencies** — two Apple/swiftlang packages
   (`swift-argument-parser`, `swift-testing`) and one system library
   (`libsqlite3`). No network dependency at runtime.
@@ -56,10 +57,15 @@ never a participant in the sampling path, so it can be absent entirely.
 | 18 | Reported "memory used" is active + wired + compressed, deliberately smaller than `top`'s total − free | macOS has no authoritative "used" figure. `top` counts inactive and file-backed cache the kernel reclaims on demand, which reads ~15 GB on a 16 GB Mac and implies a crisis that is not happening; cross-checked against `top -l 1` during development, where the wired and compressor components matched exactly and only the definition differed. Excluding reclaimable pages makes this the better predictor of approaching swap, which is what the project cares about. Every component is reported separately so a reader wanting `top`'s definition can compute it. Cost: someone comparing to `top` will see a smaller number and may think the tool is wrong. |
 | 19 | Total memory comes from `hw.memsize`, not the sum of page buckets | Summing active + inactive + wired + compressed + free reported a 16 GB Mac as 15 GB, because `host_statistics64` also tracks speculative and purgeable pages outside those five categories. Every percentage derived from the total would have been inflated by ~6%. A regression test pins total to `hw.memsize` and asserts it is at least the bucket sum. |
 | 20 | Per-process CPU utilization is uncapped at 1.0; system-wide utilization is capped | They answer different questions. A process using four cores fully reports 4.0, matching `top`'s 400% convention and making a parallel workload visible at a glance. System-wide, a figure that could reach 1000% on a 10-core machine is more confusing than useful, so it is normalized to the machine. |
+| 21 | The CLI reads SQLite directly; no IPC socket | Previously designed as a Unix domain socket. WAL gives concurrent readers alongside the daemon's single writer, so `sitrep history` needs no protocol to design, version, or keep compatible — and it keeps working when the daemon is not running, which a socket would not. Supersedes the socket in the System Shape section. Seam: a socket becomes necessary when there are *control* operations to carry (start a profiling run, arm enforcement); reads will never need one. |
+| 22 | Process history stores the top ~20 consumers per tick, not every process | ~500 readable processes at the resting cadence is ~4.3 M rows/day, which would make the monitor the disk problem it exists to detect. Top 15 by footprint plus the top 5 by CPU is ~130 k rows/day. The union matters: ranking on memory alone would make a busy compile invisible. Cost: a process that is never in either leaderboard leaves no trace in history. |
+| 23 | Adaptive cadence keys off health state, not profiling runs | The original design said 1 s "while a `sitrep run` is active", but that arrives in Milestone 4. Health is a better trigger and available now — it gives high resolution exactly during an incident, which is when timeline detail is worth paying for, and costs nothing while the machine is fine. |
+| 24 | Hysteresis is asymmetric: 15 s to escalate, 60 s to de-escalate | Escalate promptly, de-escalate reluctantly. A machine that looks clear for two seconds mid-incident has not recovered, and a symmetric threshold would let a value oscillating around a boundary produce an alert on every tick. Verified by a test that alternates states every 5 s for two minutes and asserts zero confirmed changes. |
+| 25 | Rollups average rates, take the max of peaks, and keep the *worst* level | The mean of "normal" and "critical" is not a state, and an hour averaged to 30% CPU hides a minute at 100% — which is usually the interesting part. Level columns are ranked explicitly in SQL because text ordering puts 'critical' before 'healthy' and would silently return the wrong answer. Aggregate rows are keyed on the deterministic bucket start, which makes rollup idempotent. |
 
 ## Module Layout
 
-**Built** (Milestones 0–2):
+**Built** (Milestones 0–3):
 
 ```
 Package.swift                       # SwiftPM manifest; dependency policy comments
@@ -73,6 +79,17 @@ Sources/
       Sample.swift                  # SystemReading (raw) + Sample (derived rates)
       ProcessSample.swift           # ProcessReading, ProcessSample, ProcessSnapshot
       HealthState.swift             # 🟢/🟡/🔴 from named thresholds
+    Health/
+      HealthTracker.swift           # hysteresis over successive samples
+    Storage/
+      Database.swift                # SQLite C API: connection, statements
+      Schema.swift                  # DDL and versioned migration
+      SampleStore.swift             # writes and history queries
+      Rollup.swift                  # aggregation and retention
+    Daemon/
+      DaemonPaths.swift             # Application Support locations
+      Collector.swift               # the tick loop, testable in-process
+      LaunchAgent.swift             # plist, install, uninstall, status
     Sampling/
       Capability.swift              # capability identity, status, typed reasons
       CapabilityRegistry.swift      # all 21 probes; the disclosure contract
@@ -93,14 +110,20 @@ Sources/
     StatusCommand.swift             # `sitrep` status rendering (default)
     ProcessesCommand.swift          # `sitrep processes` table
     DoctorCommand.swift             # `sitrep doctor` rendering + exit code
+    HistoryCommand.swift            # `sitrep history` window summary
+    DaemonCommand.swift             # `sitrep daemon` install/uninstall/status
+  sitrepd/
+    main.swift                      # run loop, signals, rollup schedule
 Tests/
   SitrepCoreTests/
     MachineTests.swift              # Machine + Sysctl suites
     CapabilityTests.swift           # registry, measurement sources, budget, format
     SamplingTests.swift             # system + process sampling, health thresholds
+    StorageTests.swift              # database, store, rollup
+    DaemonTests.swift               # hysteresis, collector, launch agent
 ```
 
-61 tests across ten suites.
+95 tests across sixteen suites.
 
 **Dependency rule.** `SitrepCore` imports only Darwin, Foundation, and IOKit —
 never `ArgumentParser`, never CLI concerns. Executable targets depend on
@@ -111,9 +134,6 @@ a future HTTP server to be added as peers rather than as forks of the CLI.
 
 ```
 SitrepCore/
-  Storage/                          # M3
-    Database.swift                  #   SQLite, WAL, batched writes
-    Rollup.swift                    #   retention tiers
   Profiling/                        # M4
     Attribution.swift               #   own tree + external-service delta
     ProfileRun.swift                #   N runs, median/range, contention flag
@@ -121,7 +141,6 @@ SitrepCore/
     MarkdownRenderer.swift
     ReadmeInjector.swift            #   marker-scoped replacement
     BadgeRenderer.swift             #   shields.io endpoint JSON
-Sources/sitrepd/                    # M3 — LaunchAgent daemon
 ```
 
 ## Measurement sources — built
@@ -218,51 +237,82 @@ daemon. Thresholds live in `HealthThresholds` as named constants — they are
 absolute values, and SPEC's position is that fixed thresholds are not enough, so
 learned per-project baselines replace most of them post-v1.
 
-## Storage schema — designed
+## Storage schema — built
 
-Lands in Milestone 3.
+Defined in `Storage/Schema.swift`, version 1.
 
 ```sql
 machine(id, hw_model, cpu_brand, ram_bytes, core_count, os_version, os_build,
-        first_seen, last_seen)
+        first_seen, last_seen)                  -- UNIQUE on the identity columns
 
-sample(ts, resolution, mem_free, mem_active, mem_inactive, mem_wired,
-       mem_compressed, swap_used, swap_ins, swap_outs, pressure_level,
-       thermal_state, cpu_user, cpu_system, cpu_idle, gpu_util, gpu_mem_alloc,
-       gpu_mem_inuse, disk_read, disk_write, disk_free, net_rx, net_tx)
+sample(ts, resolution, interval_seconds, sample_count,
+       mem_total, mem_used, mem_used_max, mem_active, mem_wired, mem_compressed,
+       mem_free, swap_used, swap_outs_per_sec, swap_outs_per_sec_max, pressure,
+       cpu_util, cpu_util_max, cpu_user, cpu_system,
+       gpu_util, gpu_mem_alloc, thermal,
+       disk_free, disk_read_per_sec, disk_write_per_sec,
+       net_rx_per_sec, net_tx_per_sec, health)
+       PRIMARY KEY(ts, resolution)
 
-process_sample(ts, pid, ppid, name, path_id, phys_footprint,
-               peak_phys_footprint, cpu_user_ns, cpu_system_ns,
-               diskio_read, diskio_write, start_time)
-
-path(id, path)                    -- dictionary; long paths stored once
-event(ts, kind, detail)           -- sleep, wake, reboot, jetsam_kill
-
-profile_run(id, project, scenario, version, machine_id, started_at, ended_at,
-            exit_code, command, run_index, contention_flag,
-            overhead_ram, overhead_cpu)
-profile_metric(run_id, metric, value)
+path(id, path)                                  -- UNIQUE dictionary
+process_sample(ts, pid, ppid, name, path_id, footprint, peak_footprint,
+               cpu_util, disk_read, disk_written)   PRIMARY KEY(ts, pid)
+event(id, ts, kind, detail)
+daemon_sample(ts, footprint, peak_footprint, cpu_util, within_budget)
 ```
 
 Key properties encoded by the schema:
 
-- **`sample.resolution` drives retention**, not a separate table per tier. Values
-  are `raw` (10 s), `minute`, `hour`; rollup prunes `raw` beyond 48 h, `minute`
-  beyond 30 d, `hour` beyond 1 y. Without this the "lightweight telemetry" of
-  SPEC §19 would grow unbounded and the monitor would become a disk problem it
-  is supposed to detect.
-- **`profile_metric` is long-form** so adding a measured metric needs no
-  migration. `profile_run` holds only the fields every run has.
-- **`path` is a dictionary table** because executable paths are long, highly
-  repetitive across samples, and would otherwise dominate the database size.
-- **`profile_run.overhead_ram` / `overhead_cpu` are stored per run**, so
-  mac-sitrep's own cost can be subtracted from a published requirement. See
-  SPEC's observer-effect requirement.
-- **`event` records what the OS did**, including jetsam kills, so incidents can
-  distinguish "we acted" from "macOS acted first".
+- **One `sample` table for every tier**, discriminated by `resolution`
+  (`raw`/`minute`/`hour`), rather than a table per tier. A query spanning tiers
+  stays a single `SELECT`, and retention is a `DELETE` with a `WHERE` clause.
+- **Paired average and max columns** on the values where a peak matters, because
+  an hour averaged to 30% CPU hides a minute at 100%. For raw rows the pair is
+  equal; the distinction only becomes meaningful after a rollup (decision #25).
+- **`path` is a dictionary table.** Executable paths are long and repeat on every
+  tick; storing them once keeps process history from dominating the file.
+  Orphans are dropped when the rows referencing them are pruned.
+- **`daemon_sample` is separate from `process_sample`** and carries the budget
+  verdict. Self-observability is a requirement, not an incidental row
+  (SPEC principle 6).
+- **`event` records discrete happenings**, as distinct from sampled levels. This
+  is what lets a gap in the timeline be explained rather than mysterious.
 
-Writes are batched — the daemon buffers roughly 60 s of samples and flushes once
-— so that a tool reporting disk I/O is not itself a meaningful source of it.
+History is disposable by design — it describes one machine and rebuilds by
+running longer — so migrations favour clarity over preserving every past row.
+That would be the wrong trade for the committed profile artifacts, which are the
+published source of truth (#7).
+
+## Daemon — built
+
+```
+launchd ──▶ sitrepd ──▶ Collector.tick()
+                            │
+                 SystemSampler.read() ──▶ SystemReading
+                            │  (delta against the previous reading — no sleep)
+                            ▼
+                         Sample ──▶ HealthTracker (hysteresis)
+                            │
+                            ▼
+                       SampleStore ──▶ SQLite (WAL)
+                            ▲
+                            │ read-only
+                       sitrep history
+```
+
+`Collector` holds no process-management or signal concerns, so `tick(at:)` runs
+synchronously in tests. `sitrepd` owns only the run loop, `SIGTERM`/`SIGINT`
+handling, and the rollup schedule.
+
+The first tick produces no sample — it only primes the delta — which is why the
+daemon's first row appears one interval after start.
+
+A failed tick logs and continues rather than exiting. A transient SQLite lock or
+a momentarily failing sysctl should cost one sample, not the whole history;
+persistent failure shows up as a gap plus log lines.
+
+Rollup runs on a wall-clock schedule (every 10 minutes) rather than a tick count,
+so its cost does not scale with the alert cadence.
 
 ## Known limitations
 
@@ -304,6 +354,20 @@ Writes are batched — the daemon buffers roughly 60 s of samples and flushes on
   on a typical Mac. The count is always disclosed, but it does mean the memory
   total across listed processes is far below the machine's actual usage, and
   `sitrep processes` cannot be used to account for all of RAM.
+- **The daemon's `synchronous = NORMAL` accepts losing the last commit on power
+  loss.** Correct for disposable telemetry and it avoids an fsync every few
+  seconds, but a hard crash can drop the most recent samples.
+- **Process history only covers the leaderboards.** A process never in the top 15
+  by memory or top 5 by CPU leaves no trace, so history cannot account for all of
+  RAM (decision #22).
+- **A destructive migration is the only upgrade path.** `Schema.migrate` refuses
+  to run against an unknown older version and tells the user to delete the file.
+  Acceptable while history is disposable; the first real forward migration slots
+  in as a version-to-version step.
+- **Sleep and wake are not yet recorded.** `pmset -g log` parsing is still
+  unbuilt, so a gap in the sample timeline caused by the Mac sleeping is
+  currently indistinguishable from the daemon having been stopped. The `event`
+  table has the `sleep`/`wake` kinds ready for it.
 - **`doctor` performs real I/O.** Probing is what makes the report trustworthy
   (#13), but it means the command reads sysctls, walks the IOKit registry,
   enumerates ~800 processes, and spawns `pmset`. It is cheap — roughly 30 ms and

@@ -3,6 +3,49 @@
 All notable changes to mac-sitrep. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.4.0] — 2026-08-26
+
+### Added
+
+- **Milestone 3** — history and self-observability: `sitrepd`, a user
+  LaunchAgent that records system state continuously, and `sitrep history` to
+  summarize any window of it. `sitrep daemon install|uninstall|status` manages
+  the agent — no root, no privileged helper, no password prompt.
+- SQLite storage written against the C API directly, with WAL so the CLI reads
+  while the daemon writes. Retention tiers roll raw 10-second samples into
+  minutes after 48 hours and hours after 30 days, keeping a year of history from
+  a store that would otherwise grow without bound. Rollups average rates, keep
+  the max of peaks, and keep the *worst* of levels — the mean of "normal" and
+  "critical" is not a state, and an hour averaged to 30% CPU hides a minute
+  at 100%.
+- `HealthTracker` adds hysteresis: 15 seconds to escalate, 60 to de-escalate.
+  Escalate promptly, de-escalate reluctantly — a machine clear for two seconds
+  mid-incident has not recovered. A test alternates states every 5 seconds for
+  two minutes and asserts zero confirmed changes.
+- The daemon derives rates from its previous reading rather than sleeping, which
+  is what the Milestone 2 reading/sample split existed to enable. Cadence
+  tightens from 10 s to 1 s while health is degraded, so timeline detail is paid
+  for only during an incident.
+- Self-measurement on every tick, including the sustained CPU figure a one-shot
+  CLI structurally cannot produce. Exceeding the 100 MB / 2% budget is recorded
+  as an event like any other. Measured over a 45-second run: 4.1 MB peak, 0.0%
+  CPU.
+- 95 tests across sixteen suites, including rollup aggregation against real
+  SQLite rather than a fake.
+
+### Changed
+
+- The CLI and daemon communicate only through the SQLite file — the daemon
+  writes, the CLI opens read-only. The Unix domain socket previously described
+  in `ARCHITECTURE.md` is not built: WAL makes it unnecessary for reads, and
+  history queries keep working when the daemon is stopped.
+
+### Fixed
+
+- Reported database size sums the `-wal` and `-shm` sidecars. In WAL mode the
+  main file can sit at 4 KB while the log holds 200 KB+ uncheckpointed, so the
+  previous figure under-stated mac-sitrep's own disk footprint by roughly 50×.
+
 ## [0.3.0] — 2026-08-26
 
 ### Added
