@@ -46,6 +46,38 @@ public enum ProcessSampler {
         return (readings, unreadable)
     }
 
+    /// Reads only the named processes.
+    ///
+    /// The full ``read()`` costs roughly four syscalls per process across ~800
+    /// processes. During a profiling run only the workload's own group matters
+    /// at high frequency, and re-scanning everything twenty times a second cost
+    /// ~13% CPU — enough for the profiler to perturb the CPU-bound workload it
+    /// is trying to measure.
+    public static func read(pids: some Sequence<pid_t>) -> [pid_t: ProcessReading] {
+        let now = Date()
+        var readings: [pid_t: ProcessReading] = [:]
+
+        for pid in pids {
+            guard let usage = Rusage.read(pid: pid) else { continue }
+            let path = ProcessList.path(pid: pid)
+
+            readings[pid] = ProcessReading(
+                pid: pid,
+                parentPID: ProcessList.parentPID(pid: pid),
+                name: path.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "pid \(pid)",
+                executablePath: path,
+                physicalFootprint: usage.physicalFootprint,
+                peakFootprint: max(usage.lifetimePeakFootprint, usage.physicalFootprint),
+                diskBytesRead: usage.diskBytesRead,
+                diskBytesWritten: usage.diskBytesWritten,
+                cpuNanoseconds: usage.userTimeNanoseconds + usage.systemTimeNanoseconds,
+                timestamp: now
+            )
+        }
+
+        return readings
+    }
+
     /// Takes two reads `interval` apart and derives per-process CPU.
     ///
     /// Processes that appear mid-interval are reported with zero CPU rather than

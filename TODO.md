@@ -218,20 +218,105 @@ Tests:
   Milestone 2 is resolved — watch should read from the store rather than
   re-sampling. Good candidate for a small follow-up.
 
-## Milestone 4 — Workload profiling ⬜
+## Milestone 4 — Workload profiling ✅
 
-- [ ] `Model/ProjectConfig.swift` — `.sitrep/project.json` decoding
-- [ ] `Profiling/Attribution.swift` — wrapped process tree plus declared
-      external services measured by before/during/after delta
-- [ ] `Profiling/ProfileRun.swift` — N runs, median and range, contention flag,
-      overhead subtraction
-- [ ] `sitrep run --project X -- cmd` with exact start/end boundaries and exit
-      code
-- [ ] Profile JSON artifact at `.sitrep/profiles/<project>/<version>.json`
-- [ ] Fast cadence hook so a profiling run drives 1 s sampling, alongside the
-      health trigger
-- [ ] Tests: attribution captures an external service's delta, median/range over
-      repeated runs, artifact round-trips
+Deliverable: `sitrep run --project X -- cmd` measures what a workload actually
+costs and writes a committed JSON artifact. This is the milestone the project
+exists for.
+
+Four design problems worth naming before writing code:
+
+1. **Process-tree attribution breaks on re-parenting.** When an intermediate
+   parent exits, its children are re-parented to launchd and the ppid chain to
+   our root is severed — so a build script that backgrounds work would lose it.
+   Process group id survives re-parenting, so the child is spawned into a *new*
+   process group and descendants are matched on pgid.
+2. **Lifetime peak footprint is valid for spawned processes and wrong for
+   external services.** For a process we started, the kernel's high-water mark
+   covers exactly the run. For a pre-existing daemon like Ollama it includes
+   history from before we attached, which would attribute someone else's earlier
+   peak to this run. Spawned tree uses the kernel peak; external services use
+   observed samples only.
+3. **The daemon's 10 s cadence would miss a short run entirely.** `sitrep run`
+   samples at 250 ms itself rather than relying on the collector, which also
+   keeps the profiler self-contained given there is no IPC (#21).
+4. **A profile without its conditions is barely better than a guess.** The
+   artifact records machine, command, thermal state, contention from other
+   workloads, and mac-sitrep's own overhead alongside the numbers.
+
+Model and config:
+
+- [x] `Model/ProjectConfig.swift` — `.sitrep/project.json`: scenarios, external
+      service matchers, run count, optional budget
+- [x] `Model/Profile.swift` — the artifact: machine, scenario, per-metric
+      median/min/max, conditions, overhead, capability gaps
+- [x] `Support/Spawn.swift` — `posix_spawn` with `POSIX_SPAWN_SETPGROUP`
+- [x] `ProcessList.processGroupID(pid:)`
+
+Profiling:
+
+- [x] `Profiling/Attribution.swift` — pgid-matched own tree plus declared
+      external services by before/during delta
+- [x] `Profiling/ProfileRun.swift` — settle, spawn, sample at 250 ms, wait,
+      aggregate; N runs to median and range
+
+Interface:
+
+- [x] `sitrep init` — generate a starter `.sitrep/project.json`
+- [x] `sitrep run --project X -- cmd`, `--runs`, `--scenario`, `--json`
+- [x] Artifact written to `.sitrep/profiles/<project>/<version>-<scenario>.json`
+
+Tests:
+
+- [x] Spawned child lands in its own process group and descendants are matched
+- [x] External service delta subtracts the pre-run baseline
+- [x] Median and range over repeated runs
+- [x] Artifact round-trips through JSON
+- [x] Config decoding, including defaults for omitted fields
+
+- Note: **the biggest bug found so far.** `ri_user_time`/`ri_system_time` are
+  mach absolute time units, not nanoseconds — 24 MHz on Apple Silicon, so every
+  per-process CPU number since Milestone 1 was 41.67× too low. A busy loop read
+  2.4%; the daemon reported 0.0% for itself. Caught only because a profiled
+  busy-loop workload reported 2.7% when it should have been ~100%. Fixed in
+  `Rusage` via `mach_timebase_info` (ARCHITECTURE #28).
+- Note: the first profiling run hung forever. `kill(pid, 0)` succeeds on an
+  unreaped zombie, so the liveness check never went false. Replaced with
+  `waitpid(WNOHANG)`, which detects *and* reaps. Regression test pins it.
+- Note: a 280 ms workload reported "0 B peak" because no samples landed between
+  spawn and exit. Presenting "we saw nothing" as "it used nothing" is the worst
+  failure a measurement tool has available. Sampling is now 50 ms and short runs
+  are flagged (ARCHITECTURE #29).
+- Note: `ollama run` inherits stdin; with stdin on a pipe that never closed it
+  slept 17 minutes instead of answering, and `sitrep run` had no timeout. Added
+  `--timeout`, killing the process group (ARCHITECTURE #31).
+- Note: profiler overhead was ~13% CPU at 50 ms with full table scans — enough to
+  distort a CPU-bound measurement. Now scans fully every 5th sample and reads
+  known group members directly in between; 57% cheaper, same numbers.
+- Note: mmap-backed model weights are excluded from physical footprint, so
+  `llama-server` showing 3.3 GB RSS reports 628 MB footprint. Correct for
+  "exclusive requirement", misleading against Activity Monitor. Recorded in
+  ARCHITECTURE limitations.
+- Note: `pmset -g log` sleep/wake parsing still not built, carried from
+  Milestone 3.
+- Note: `daemon install` raced launchd. `bootout` unloads asynchronously, so an
+  immediate `bootstrap` failed with EIO (launchctl exit 5) and left the plist
+  written but not loaded. Now waits for the job to disappear before bootstrapping.
+  Only surfaced when reinstalling over a running daemon.
+- Note: no `sitrep watch` yet. Still a good small follow-up.
+
+## Milestone 5 — Publishing ⬜
+
+- [ ] `Export/MarkdownRenderer.swift` — requirements block from a profile
+- [ ] `Export/ReadmeInjector.swift` — marker-scoped replacement, refusing
+      malformed or duplicated markers; append when markers are absent
+- [ ] `sitrep export --inject README.md` and `--check` drift gate
+- [ ] `Export/BadgeRenderer.swift` — shields.io endpoint JSON
+- [ ] `sitrep compare <project> <a> <b>` — regression diff between artifacts
+- [ ] `sitrep can-i-run <project>` — fit prediction against current free memory
+- [ ] mac-sitrep publishes its own measured requirements into its own README
+- [ ] Tests: injection is idempotent, `--check` detects drift, malformed markers
+      are refused, comparison detects a regression
 
 ## Parked / needs user input
 

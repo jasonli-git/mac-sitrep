@@ -3,6 +3,48 @@
 All notable changes to mac-sitrep. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.5.0] — 2026-08-26
+
+### Added
+
+- **Milestone 4** — workload profiling: `sitrep run` measures what a workload
+  actually costs across repeated runs and writes a committed JSON artifact under
+  `.sitrep/profiles/`. `sitrep init` generates a starter config.
+- Attribution follows the **process group**, not the parent chain. Workloads are
+  spawned via `posix_spawn` into a new group, so work that outlives an
+  intermediate parent — a shell wrapper, a backgrounded build step — is still
+  counted after macOS re-parents it to launchd.
+- External services declared in config are measured as their increase over a
+  pre-run baseline, and followed after the command exits until their footprint
+  stops growing. This is the case naive attribution gets wrong: profiling
+  `ollama run` against a 4B model measured 11 MB in the spawned group and 416 MB
+  in the server — 97% of the cost living in a daemon that was already running.
+- Profiles report median with min/max across runs, plus the conditions the
+  measurement was taken under: worst thermal state, peak swap-out rate, and CPU
+  used by unrelated work. A spread wider than 20% is called out rather than
+  hidden behind the median.
+- Runs are bounded by a timeout that kills the whole process group, and runs
+  sampled too few times are flagged as unmeasured rather than reported as zero.
+- 120 tests across twenty-one suites.
+
+### Fixed
+
+- **Per-process CPU was understated by 41.67×.** `ri_user_time` and
+  `ri_system_time` are mach absolute time units, not nanoseconds despite the
+  field names; they tick at 24 MHz on Apple Silicon. Every per-process CPU figure
+  the tool had produced was wrong — a busy loop read 2.4% instead of 100%, and
+  the daemon reported its own CPU as 0.0%. Converted once in `Rusage` so all
+  consumers are correct.
+- Profiler overhead cut 57% (0.861 s → 0.373 s CPU on the same workload) by
+  reading known process-group members directly between full table scans. At 50 ms
+  sampling the full scan cost ~13% CPU, enough to distort the CPU-bound workloads
+  being measured.
+- `sitrep daemon status` and `sitrep history` no longer report per-process CPU
+  as zero, a downstream effect of the mach-units fix.
+- `sitrep daemon install` waits for launchd to finish unloading before
+  bootstrapping. `bootout` is asynchronous, so reinstalling over a running
+  daemon failed with EIO and left the agent installed but not loaded.
+
 ## [0.4.0] — 2026-08-26
 
 ### Added

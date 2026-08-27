@@ -85,18 +85,37 @@ public enum LaunchAgent {
             .write(toFile: DaemonPaths.launchAgentPath, atomically: true, encoding: .utf8)
 
         // Unload first so install is idempotent and picks up a changed plist.
+        //
+        // launchd unloads asynchronously, so bootstrapping immediately after
+        // bootout races it and fails with EIO. Wait for the job to actually
+        // disappear rather than assuming the command was synchronous.
         _ = try? CommandRunner.run(
             "/bin/launchctl", ["bootout", "gui/\(getuid())/\(DaemonPaths.bundleIdentifier)"]
         )
+        waitForUnload()
+
         _ = try CommandRunner.run(
             "/bin/launchctl", ["bootstrap", "gui/\(getuid())", DaemonPaths.launchAgentPath]
         )
+    }
+
+    /// Blocks until launchd no longer knows about the job, up to `timeout`.
+    private static func waitForUnload(timeout: TimeInterval = 5) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            let stillLoaded = (try? CommandRunner.run(
+                "/bin/launchctl", ["print", "gui/\(getuid())/\(DaemonPaths.bundleIdentifier)"]
+            )) != nil
+            if !stillLoaded { return }
+            Thread.sleep(forTimeInterval: 0.2)
+        }
     }
 
     public static func uninstall() throws {
         _ = try? CommandRunner.run(
             "/bin/launchctl", ["bootout", "gui/\(getuid())/\(DaemonPaths.bundleIdentifier)"]
         )
+        waitForUnload()
         if FileManager.default.fileExists(atPath: DaemonPaths.launchAgentPath) {
             try FileManager.default.removeItem(atPath: DaemonPaths.launchAgentPath)
         }

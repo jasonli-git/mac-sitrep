@@ -62,10 +62,17 @@ never a participant in the sampling path, so it can be absent entirely.
 | 23 | Adaptive cadence keys off health state, not profiling runs | The original design said 1 s "while a `sitrep run` is active", but that arrives in Milestone 4. Health is a better trigger and available now — it gives high resolution exactly during an incident, which is when timeline detail is worth paying for, and costs nothing while the machine is fine. |
 | 24 | Hysteresis is asymmetric: 15 s to escalate, 60 s to de-escalate | Escalate promptly, de-escalate reluctantly. A machine that looks clear for two seconds mid-incident has not recovered, and a symmetric threshold would let a value oscillating around a boundary produce an alert on every tick. Verified by a test that alternates states every 5 s for two minutes and asserts zero confirmed changes. |
 | 25 | Rollups average rates, take the max of peaks, and keep the *worst* level | The mean of "normal" and "critical" is not a state, and an hour averaged to 30% CPU hides a minute at 100% — which is usually the interesting part. Level columns are ranked explicitly in SQL because text ordering puts 'critical' before 'healthy' and would silently return the wrong answer. Aggregate rows are keyed on the deterministic bucket start, which makes rollup idempotent. |
+| 26 | Attribution follows the **process group**, not the parent chain | When an intermediate parent exits its children are re-parented to launchd, severing any ppid walk back to the workload root — so a build script that backgrounds work would lose it. `sitrep run` spawns via `posix_spawn` with `POSIX_SPAWN_SETPGROUP`, and descendants are matched on pgid, which survives re-parenting. Setting the group with `setpgid` after `Process` launches races the child's `exec`, which is why Foundation's `Process` is not used. |
+| 27 | Kernel lifetime-peak footprint is used for the spawned group and **not** for external services | For a process this run started, the kernel's high-water mark covers exactly the run. For a pre-existing daemon it includes history from before we attached — profiling against an Ollama instance that had already served a large model would attribute that earlier peak to this run. Services are measured from observed samples against a pre-run baseline instead. |
+| 28 | `ri_user_time` and `ri_system_time` are **mach absolute time units**, not nanoseconds | Despite the field names. They tick at 24 MHz on Apple Silicon, so dividing by 1e9 under-reports CPU by 41.67×: a busy loop that should read 100% read 2.4%, and the daemon reported its own CPU as 0.0%. Converted once in `Rusage` via `mach_timebase_info` so every consumer is correct. Verified by burning a known second of CPU and checking the ratio. |
+| 29 | A run's peak is reported as unmeasured rather than zero when too few samples land | A 280 ms workload reported "0 B peak" simply because nothing was observed between spawn and exit. Presenting "we saw nothing" as "it used nothing" is the worst failure available to a measurement tool. Sampling is 50 ms and any run under three samples is flagged, not silently averaged in. |
+| 30 | External services are followed until their footprint **stops growing**, not for a fixed window | An inference server keeps loading after the client that asked it returns: `ollama run` against a cold model captured 349 MB while the server settled far higher. A fixed post-run window has no principled length, since load time depends on the model. Watching until growth stops supports a claim the tool can defend — *we watched until it stopped growing* — with a 30 s cap that is recorded when hit. |
+| 31 | Every run is bounded by a timeout that kills the process **group** | A profiler that can hang forever is a bad profiler. Not hypothetical: `ollama run` inherits stdin, and with stdin on a pipe that never closed it slept for seventeen minutes instead of answering. Killing the group rather than the pid is why the group exists — signalling the leader alone would orphan its children. Timed-out runs are recorded as such, since they measured a hang rather than the work. |
+| 32 | During a run, full process-table scans happen every 5th sample; targeted reads in between | The full scan costs ~4 syscalls across ~800 processes. At 50 ms that was ~13% CPU — enough for the profiler to distort the CPU-bound workloads it exists to measure. Known group members are re-read directly between scans, which cut overhead 57% (0.861 s → 0.373 s CPU on the same workload) with identical results. Contention is only accumulated from full scans, since a targeted read sees nothing outside the workload. |
 
 ## Module Layout
 
-**Built** (Milestones 0–3):
+**Built** (Milestones 0–4):
 
 ```
 Package.swift                       # SwiftPM manifest; dependency policy comments
@@ -79,6 +86,8 @@ Sources/
       Sample.swift                  # SystemReading (raw) + Sample (derived rates)
       ProcessSample.swift           # ProcessReading, ProcessSample, ProcessSnapshot
       HealthState.swift             # 🟢/🟡/🔴 from named thresholds
+      ProjectConfig.swift           # .sitrep/project.json
+      Profile.swift                 # Statistic, RunResult, the artifact
     Health/
       HealthTracker.swift           # hysteresis over successive samples
     Storage/
@@ -86,6 +95,9 @@ Sources/
       Schema.swift                  # DDL and versioned migration
       SampleStore.swift             # writes and history queries
       Rollup.swift                  # aggregation and retention
+    Profiling/
+      Attribution.swift             # pgid group + external-service delta
+      ProfileRun.swift              # settle, spawn, sample, aggregate
     Daemon/
       DaemonPaths.swift             # Application Support locations
       Collector.swift               # the tick loop, testable in-process
@@ -105,6 +117,7 @@ Sources/
       SwapUsage.swift               # vm.swapusage + pressure/compressor counters
       CommandRunner.swift           # bounded subprocess; pmset only
       Format.swift                  # byte/second/percent rendering at the edge
+      Spawn.swift                   # posix_spawn into a new process group
   sitrep/
     SitrepCommand.swift             # CLI root
     StatusCommand.swift             # `sitrep` status rendering (default)
@@ -112,6 +125,7 @@ Sources/
     DoctorCommand.swift             # `sitrep doctor` rendering + exit code
     HistoryCommand.swift            # `sitrep history` window summary
     DaemonCommand.swift             # `sitrep daemon` install/uninstall/status
+    RunCommand.swift                # `sitrep run` and `sitrep init`
   sitrepd/
     main.swift                      # run loop, signals, rollup schedule
 Tests/
@@ -121,9 +135,10 @@ Tests/
     SamplingTests.swift             # system + process sampling, health thresholds
     StorageTests.swift              # database, store, rollup
     DaemonTests.swift               # hysteresis, collector, launch agent
+    ProfilingTests.swift            # statistic, config, spawn, attribution, artifact
 ```
 
-95 tests across sixteen suites.
+120 tests across twenty-one suites.
 
 **Dependency rule.** `SitrepCore` imports only Darwin, Foundation, and IOKit —
 never `ArgumentParser`, never CLI concerns. Executable targets depend on
@@ -134,9 +149,6 @@ a future HTTP server to be added as peers rather than as forks of the CLI.
 
 ```
 SitrepCore/
-  Profiling/                        # M4
-    Attribution.swift               #   own tree + external-service delta
-    ProfileRun.swift                #   N runs, median/range, contention flag
   Export/                           # M5
     MarkdownRenderer.swift
     ReadmeInjector.swift            #   marker-scoped replacement
@@ -314,6 +326,45 @@ persistent failure shows up as a gap plus log lines.
 Rollup runs on a wall-clock schedule (every 10 minutes) rather than a tick count,
 so its cost does not scale with the alert cadence.
 
+## Profiling — built
+
+```
+sitrep run ──▶ settle (baseline declared services)
+                   │
+                   ▼
+           Spawn.launch ──▶ new process group
+                   │
+                   ▼
+     sample every 50 ms ──┬── own group  (pgid match)
+                          ├── services   (substring match)
+                          └── everything else → contention
+                   │  full table scan every 5th sample
+                   ▼
+           poll(WNOHANG) ──▶ exited? ──▶ follow services until stable
+                   │                            │
+                   ▼                            ▼
+              RunResult ──── × N runs ───▶ Statistic (median, min, max)
+                                                 │
+                                                 ▼
+                                    .sitrep/profiles/<project>/<version>-<scenario>.json
+```
+
+The two populations are measured differently on purpose. The spawned group can
+use the kernel's lifetime-peak footprint, because those processes were started by
+this run. Declared services cannot — their high-water mark predates us — so they
+are measured as observed peak minus a pre-run baseline (#27).
+
+That distinction is the whole point. Profiling `ollama run` against a 4B model
+measured **11 MB in the spawned group and 416 MB in the external service**: 97% of
+the cost lives in a daemon that was already running, which naive process-tree
+attribution reports as zero.
+
+Three things bound the loop, each learned the hard way and each recorded as a
+decision: exit is detected with `waitpid(WNOHANG)` rather than a liveness check
+(#31 context — a zombie answers `kill(pid, 0)` forever), every run has a timeout
+that kills the group (#31), and services are followed until they stop growing
+rather than for a fixed window (#30).
+
 ## Known limitations
 
 - **Tests require the vendored `swift-testing` package** on a machine without
@@ -368,6 +419,20 @@ so its cost does not scale with the alert cadence.
   unbuilt, so a gap in the sample timeline caused by the Mac sleeping is
   currently indistinguishable from the daemon having been stopped. The `event`
   table has the `sleep`/`wake` kinds ready for it.
+- **Peak figures for mmap-backed model weights understate resident memory.**
+  Physical footprint excludes file-backed pages, so a `llama-server` showing 3.3 GB
+  RSS reported 628 MB footprint. That is the correct answer for "how much memory
+  does this need exclusively" and the wrong one for "how much RAM is this
+  occupying". Weights loaded by `mmap` are reclaimable, so counting them would
+  overstate the requirement — but a reader comparing against Activity Monitor
+  will see a large gap.
+- **A workload shorter than a few sample intervals cannot be characterized.**
+  Flagged rather than reported as zero (#29), but the floor is real: profiling
+  something that runs in 100 ms will not produce a usable peak.
+- **External-service attribution is substring matching on the executable path.**
+  A declared service of `ollama` also matches anything else with that substring.
+  Adequate for the real cases and cheap to reason about; a project needing
+  finer matching would want a bundle id or listening port instead.
 - **`doctor` performs real I/O.** Probing is what makes the report trustworthy
   (#13), but it means the command reads sysctls, walks the IOKit registry,
   enumerates ~800 processes, and spawns `pmset`. It is cheap — roughly 30 ms and

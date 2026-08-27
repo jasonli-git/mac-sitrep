@@ -10,6 +10,23 @@ import Darwin
 /// return `nil`, which is a disclosed gap rather than an error (ARCHITECTURE #4).
 public enum Rusage {
 
+    /// Converts mach absolute time units to nanoseconds.
+    ///
+    /// `ri_user_time` and `ri_system_time` are **not** nanoseconds despite the
+    /// field names suggesting duration. They are mach absolute time units,
+    /// which tick at 24 MHz on Apple Silicon rather than 1 GHz — so treating
+    /// them as nanoseconds under-reports CPU by a factor of 41.67. A busy loop
+    /// that should read 100% reads 2.4%.
+    ///
+    /// The timebase is fixed for the life of the machine, so it is read once.
+    private static let machTicksToNanoseconds: Double = {
+        var timebase = mach_timebase_info_data_t()
+        guard mach_timebase_info(&timebase) == KERN_SUCCESS, timebase.denom != 0 else {
+            return 1  // Fall back to identity rather than producing zeros.
+        }
+        return Double(timebase.numer) / Double(timebase.denom)
+    }()
+
     /// Reads resource usage for a process, or `nil` if it is gone or not ours.
     public static func read(pid: pid_t) -> Snapshot? {
         var info = rusage_info_v4()
@@ -29,14 +46,18 @@ public enum Rusage {
             lifetimePeakFootprint: info.ri_lifetime_max_phys_footprint,
             diskBytesRead: info.ri_diskio_bytesread,
             diskBytesWritten: info.ri_diskio_byteswritten,
-            userTimeNanoseconds: info.ri_user_time,
-            systemTimeNanoseconds: info.ri_system_time
+            userTimeNanoseconds: nanoseconds(fromMachTicks: info.ri_user_time),
+            systemTimeNanoseconds: nanoseconds(fromMachTicks: info.ri_system_time)
         )
     }
 
     /// Resource usage for the calling process.
     public static func current() -> Snapshot? {
         read(pid: getpid())
+    }
+
+    static func nanoseconds(fromMachTicks ticks: UInt64) -> UInt64 {
+        UInt64(Double(ticks) * machTicksToNanoseconds)
     }
 
     /// A point-in-time reading for one process.
@@ -58,7 +79,10 @@ public enum Rusage {
 
         public let diskBytesRead: UInt64
         public let diskBytesWritten: UInt64
+        /// User CPU time in nanoseconds, converted from the kernel's mach
+        /// absolute time units.
         public let userTimeNanoseconds: UInt64
+        /// System CPU time in nanoseconds, likewise converted.
         public let systemTimeNanoseconds: UInt64
 
         /// Total CPU time consumed, in seconds.

@@ -20,9 +20,9 @@ For what it should do and why, see [SPEC.md](SPEC.md). For how it is built, see
 
 ## Status
 
-**v0.4.0 — Milestone 3 of 5 complete.** Live measurement and background history
-both work: a collector records state continuously and reports what it costs to
-do so. Workload profiling is next. See
+**v0.5.0 — Milestone 4 of 5 complete.** The core loop works end to end: measure
+a workload, attribute what it really costs, and write a committed artifact.
+Publishing that artifact into a README is the last milestone. See
 [ROADMAP.md](ROADMAP.md) for what is planned and [CHANGELOG.md](CHANGELOG.md)
 for what has shipped.
 
@@ -35,6 +35,11 @@ for what has shipped.
 - **`sitrep processes`** — top consumers by physical footprint (Activity
   Monitor's "Memory", not RSS) or CPU, with `--limit` and `--sort`. Always
   reports how many processes could not be read without root.
+- **`sitrep run`** — profiles a workload across repeated runs and writes a JSON
+  artifact under `.sitrep/profiles/`. Measures the process *group*, so work that
+  outlives an intermediate parent still counts, and measures declared external
+  services as their increase over a pre-run baseline. `sitrep init` creates a
+  starter config.
 - **`sitrep daemon install`** — runs a background collector as a user
   LaunchAgent. No root, no privileged helper, no password prompt. `uninstall`
   and `status` do what they say; `status` reports what the collector has cost.
@@ -82,9 +87,21 @@ zero-swap policy would read as permanently violated.
     → use thermal.state instead
 ```
 
-Measured over a 45-second collector run on this machine: **4.1 MB peak
-footprint against its declared 100 MB budget, 0.0% CPU.** The tool holds itself
-to the rule it applies to everything else.
+Why the process-group and external-service handling matters — profiling
+`ollama run` against a 4B model on this machine:
+
+```
+peak RAM        427 MB
+  own tree       11 MB     ← the command you actually ran
+  external      416 MB     ← the model server that was already running
+```
+
+97% of the cost lives in a daemon outside the process tree. Attribution by
+parent chain reports 11 MB and is wrong by 38×.
+
+The collector holds itself to the same rule it applies to everything else:
+**4.1 MB peak against its declared 100 MB budget**, measured by itself and
+reported by `sitrep daemon status`.
 
 Everything below is specified and designed but not yet built — see
 [ROADMAP.md](ROADMAP.md):

@@ -40,6 +40,21 @@ public enum ProcessList {
         return String(cString: buffer)
     }
 
+    /// Process group id.
+    ///
+    /// Attribution matches on this rather than the parent chain: when an
+    /// intermediate parent exits its children are re-parented to launchd, which
+    /// severs any ppid walk back to the workload root. The group id survives
+    /// that (ARCHITECTURE #26).
+    public static func processGroupID(pid: pid_t) -> pid_t? {
+        var info = proc_bsdinfo()
+        let size = proc_pidinfo(
+            pid, PROC_PIDTBSDINFO, 0, &info, Int32(MemoryLayout<proc_bsdinfo>.size)
+        )
+        guard size == Int32(MemoryLayout<proc_bsdinfo>.size) else { return nil }
+        return pid_t(info.pbi_pgid)
+    }
+
     /// Parent PID, for reconstructing the process tree.
     public static func parentPID(pid: pid_t) -> pid_t? {
         var info = proc_bsdinfo()
