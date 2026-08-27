@@ -58,6 +58,12 @@ public struct ProfileComparison: Sendable {
                 metric: "peak RAM", before: baseline.peakRAMBytes.median,
                 after: candidate.peakRAMBytes.median, format: bytes, higherIsWorse: true
             ),
+            // CPU time before peak: it is exact, where peak is an artifact of
+            // the sampling window as much as of the workload.
+            Change(
+                metric: "cpu time", before: baseline.cpuSeconds.median,
+                after: candidate.cpuSeconds.median, format: seconds, higherIsWorse: true
+            ),
             Change(
                 metric: "peak CPU", before: baseline.peakCPU.median,
                 after: candidate.peakCPU.median, format: percent, higherIsWorse: true

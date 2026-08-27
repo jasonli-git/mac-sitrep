@@ -10,6 +10,7 @@ private func makeRun(
     RunResult(
         index: index, exitCode: 0, wallClockSeconds: wall,
         ownPeakRAMBytes: peak, externalPeakRAMBytes: external, peakCPU: cpu,
+        cpuSeconds: wall * 0.9,
         diskReadBytes: 1 << 20, diskWrittenBytes: 0,
         peakSwapOutsPerSecond: swapOuts, worstThermal: thermal,
         contendingCPU: 0.05, timedOut: false,
@@ -37,6 +38,7 @@ private func makeProfile(
         ownPeakRAMBytes: Statistic(runs.map { Double($0.ownPeakRAMBytes) }),
         externalPeakRAMBytes: Statistic(runs.map { Double($0.externalPeakRAMBytes) }),
         peakCPU: Statistic(runs.map(\.peakCPU)),
+        cpuSeconds: Statistic(runs.map(\.cpuSeconds)),
         wallClockSeconds: Statistic(runs.map(\.wallClockSeconds)),
         diskReadBytes: Statistic(runs.map { Double($0.diskReadBytes) }),
         diskWrittenBytes: Statistic(runs.map { Double($0.diskWrittenBytes) }),
@@ -126,6 +128,23 @@ struct MarkdownRendererTests {
         // Printing "400 MB (400 MB – 400 MB)" is noise.
         let block = MarkdownRenderer.requirementsBlock(makeProfile())
         #expect(!block.contains("400 MB _(400 MB"))
+    }
+
+    @Test("CPU time leads, and peak CPU discloses its window")
+    func cpuTimeLeadsPeakIsQualified() {
+        // Peak CPU is an artifact of the sampling rate as much as of the
+        // workload: a 15 ms burst read through a 50 ms window reports about a
+        // third of its real intensity. The exact figure goes first, and the
+        // sampled one says what window produced it.
+        let block = MarkdownRenderer.requirementsBlock(makeProfile())
+
+        #expect(block.contains("| CPU time |"))
+        #expect(block.contains("ms window"))
+        #expect(
+            block.range(of: "| CPU time |")!.lowerBound
+                < block.range(of: "Peak CPU")!.lowerBound,
+            "the exact figure should come before the sampled one"
+        )
     }
 
     @Test("Zero swap says so in words")
@@ -509,7 +528,8 @@ struct ArtifactDiscoveryTests {
                 runs: profile.runs, peakRAMBytes: profile.peakRAMBytes,
                 ownPeakRAMBytes: profile.ownPeakRAMBytes,
                 externalPeakRAMBytes: profile.externalPeakRAMBytes,
-                peakCPU: profile.peakCPU, wallClockSeconds: profile.wallClockSeconds,
+                peakCPU: profile.peakCPU, cpuSeconds: profile.cpuSeconds,
+                wallClockSeconds: profile.wallClockSeconds,
                 diskReadBytes: profile.diskReadBytes,
                 diskWrittenBytes: profile.diskWrittenBytes,
                 conditions: profile.conditions, overhead: profile.overhead,

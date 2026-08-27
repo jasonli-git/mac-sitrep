@@ -102,7 +102,8 @@ public enum ProfileRun {
             report(
                 "  \(Format.seconds(result.wallClockSeconds))"
                     + " · peak \(Format.bytes(result.totalPeakRAMBytes))"
-                    + " · cpu \(Format.percent(result.peakCPU))"
+                    + " · cpu \(Format.seconds(result.cpuSeconds))"
+                    + " (peak \(Format.percent(result.peakCPU)))"
                     + (result.exitCode == 0 ? "" : " · EXIT \(result.exitCode)")
                     + (result.timedOut ? " · TIMED OUT" : "")
                     + (result.wasObserved ? "" : " · only \(result.sampleCount) samples")
@@ -145,6 +146,7 @@ public enum ProfileRun {
             ownPeakRAMBytes: Statistic(results.map { Double($0.ownPeakRAMBytes) }),
             externalPeakRAMBytes: Statistic(results.map { Double($0.externalPeakRAMBytes) }),
             peakCPU: Statistic(results.map(\.peakCPU)),
+            cpuSeconds: Statistic(results.map(\.cpuSeconds)),
             wallClockSeconds: Statistic(results.map(\.wallClockSeconds)),
             diskReadBytes: Statistic(results.map { Double($0.diskReadBytes) }),
             diskWrittenBytes: Statistic(results.map { Double($0.diskWrittenBytes) }),
@@ -204,13 +206,15 @@ public enum ProfileRun {
         var previousSystem = SystemSampler.read()
 
         var exitCode: Int32 = -1
+        var cpuSeconds = 0.0
         while true {
             Thread.sleep(forTimeInterval: sampleInterval)
 
             // Poll before sampling so the final sample is taken while the
             // process is still alive, then the loop exits.
-            if let code = Spawn.poll(pid: child.pid) {
-                exitCode = code
+            if let completion = Spawn.poll(pid: child.pid) {
+                exitCode = completion.exitCode
+                cpuSeconds = completion.cpuSeconds
                 break
             }
 
@@ -309,6 +313,7 @@ public enum ProfileRun {
                 ownPeakRAMBytes: max(ownPeak, ownKernelPeak),
                 externalPeakRAMBytes: attribution.externalDelta(observedPeaks: servicePeaks),
                 peakCPU: peakCPU,
+                cpuSeconds: cpuSeconds,
                 diskReadBytes: diskRead,
                 diskWrittenBytes: diskWritten,
                 peakSwapOutsPerSecond: peakSwapOuts,

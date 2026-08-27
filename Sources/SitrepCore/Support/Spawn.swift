@@ -84,18 +84,32 @@ public enum Spawn {
         return Child(pid: pid, processGroupID: pid)
     }
 
-    /// Blocks until `pid` exits, returning its exit status.
-    public static func wait(pid: pid_t) -> Int32 {
+    /// Blocks until `pid` exits, returning what it cost.
+    public static func wait(pid: pid_t) -> Completion {
         var status: Int32 = 0
-        while waitpid(pid, &status, 0) == -1 {
-            if errno != EINTR { return -1 }
+        var usage = rusage()
+
+        while wait4(pid, &status, 0, &usage) == -1 {
+            if errno != EINTR { return Completion(exitCode: -1, cpuSeconds: 0) }
         }
-        return exitCode(from: status)
+        return Completion(exitCode: exitCode(from: status), cpuSeconds: seconds(of: usage))
+    }
+
+    /// What a finished child cost, straight from the kernel.
+    public struct Completion: Sendable {
+        public let exitCode: Int32
+        /// Exact CPU time the child and its reaped descendants consumed.
+        ///
+        /// Not sampled, so it carries no window-averaging error. A sampled
+        /// "peak CPU" is a property of the sampling rate as much as of the
+        /// workload — a 15 ms burst read through a 50 ms window reports about a
+        /// third of its true intensity. This number has no such caveat.
+        public let cpuSeconds: Double
     }
 
     /// Checks whether `pid` has exited without blocking, reaping it if so.
     ///
-    /// Returns `nil` while the child is still running, or its exit status once
+    /// Returns `nil` while the child is still running, or its completion once
     /// it has finished.
     ///
     /// A sampling loop **must** poll with this rather than testing liveness with
@@ -103,16 +117,31 @@ public enum Spawn {
     /// it, and a zombie still answers `kill(pid, 0)` successfully — so a
     /// liveness check never goes false and the loop spins forever. That is not
     /// hypothetical: it hung the first profiling run.
-    public static func poll(pid: pid_t) -> Int32? {
+    public static func poll(pid: pid_t) -> Completion? {
         var status: Int32 = 0
+        var usage = rusage()
 
         while true {
-            let result = waitpid(pid, &status, WNOHANG)
+            // wait4 rather than waitpid: it fills in the child's rusage, which
+            // is the only exact source of CPU time. Sampling can only ever
+            // approximate it.
+            let result = wait4(pid, &status, WNOHANG, &usage)
             if result == 0 { return nil }           // still running
-            if result == pid { return exitCode(from: status) }
+            if result == pid {
+                return Completion(
+                    exitCode: exitCode(from: status), cpuSeconds: seconds(of: usage)
+                )
+            }
             if errno == EINTR { continue }          // interrupted; retry
-            return -1                               // gone, or never ours
+            return Completion(exitCode: -1, cpuSeconds: 0)  // gone, or never ours
         }
+    }
+
+    static func seconds(of usage: rusage) -> Double {
+        func total(_ time: timeval) -> Double {
+            Double(time.tv_sec) + Double(time.tv_usec) / 1_000_000
+        }
+        return total(usage.ru_utime) + total(usage.ru_stime)
     }
 
     /// Terminates a whole process group, escalating if it does not stop.

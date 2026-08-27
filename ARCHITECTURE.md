@@ -78,6 +78,7 @@ never a participant in the sampling path, so it can be absent entirely.
 | 40 | Supersedes #18 — used memory is **app memory + wired + compressed**, matching Activity Monitor | #18 excluded reclaimable pages, which was the right instinct applied with the wrong proxy. It used `active`, but `inactive` is not uniformly reclaimable: it holds file-backed pages (free to drop) *and* anonymous pages owned by processes and dirty, which cost a compression or a swap to reclaim. Excluding the latter under-reported by 1.2 GB on a real 16 GB Mac — 11 GB against Activity Monitor's 12.8 GB — for no defensible reason. App memory is `internal_page_count − purgeable_count`; verified against `vm_stat` at 4.9 GB vs 4.88 GB. Matching Activity Monitor is a feature, not a coincidence: a reader can cross-check against a tool they already trust. Still below `top`'s total − free, which counts the file cache. |
 | 41 | Available memory is total − used, replacing free + inactive | Same error in the same place: counting `inactive` as available treats anonymous dirty pages as free when obtaining them costs a swap. Deriving available from used keeps `sitrep` and `can-i-run` telling the same story, and means one definition governs both. |
 | 42 | Redefining a stored metric bumps the schema and clears the affected rows | The v1 → v2 change altered what `mem_used` means. No arithmetic recovers the missing pages after the fact, and a `history --since 7d` spanning the change would silently average two different quantities — the invisible wrongness this project exists to prevent. Samples are dropped; machine identity, events, and self-measurements survive, and an event records why the gap is there. History is disposable by design (#7), which is what makes this affordable. |
+| 43 | Profiles report exact CPU time from `wait4` rusage, with sampled peak CPU labelled by its window | A sampled peak is a property of the sampling rate as much as of the workload: `sitrep processes` consumes 0.035 s of CPU in bursts shorter than the 50 ms sampling window, so the window averages a near-full core down to 31%. Published as an unqualified "Peak CPU 31%" that reads as a heavy tool, which it is not. `wait4` returns the child's rusage on exit — exact, sampling-independent — so CPU *time* leads the published table and peak follows with "(per 50 ms window)" attached. Sampling could never produce the exact figure; nothing is lost by taking it from the kernel. |
 
 ## Module Layout
 
@@ -153,7 +154,7 @@ Tests/
     ExportTests.swift               # rendering, injection, badge, compare, fit
 ```
 
-156 tests across twenty-eight suites.
+157 tests across twenty-eight suites.
 
 **Dependency rule.** `SitrepCore` imports only Darwin, Foundation, and IOKit —
 never `ArgumentParser`, never CLI concerns. Executable targets depend on
@@ -480,6 +481,10 @@ rather than decorative.
   A declared service of `ollama` also matches anything else with that substring.
   Adequate for the real cases and cheap to reason about; a project needing
   finer matching would want a bundle id or listening port instead.
+- **Peak CPU cannot see a burst shorter than the sampling window.** Reported at
+  50 ms granularity, so a 15 ms burst at full core reads as roughly a third of
+  one. `cpuSeconds` is exact and carries no such caveat, which is why it leads
+  the published table (#43).
 - **Disk-read comparisons are page-cache sensitive.** A second run of the same
   workload often reads nothing, which `compare` reports as a large improvement.
   It never produces a false *regression*, so it is left in as informative rather

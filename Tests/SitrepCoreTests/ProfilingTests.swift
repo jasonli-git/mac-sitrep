@@ -120,17 +120,18 @@ struct SpawnTests {
     func pollReportsExit() throws {
         let child = try Spawn.launch(["/bin/sh", "-c", "exit 7"])
 
-        var code: Int32?
+        var completion: Spawn.Completion?
         let deadline = Date().addingTimeInterval(5)
         while Date() < deadline {
             if let result = Spawn.poll(pid: child.pid) {
-                code = result
+                completion = result
                 break
             }
             Thread.sleep(forTimeInterval: 0.02)
         }
 
-        #expect(code == 7)
+        #expect(completion?.exitCode == 7)
+        #expect(completion?.cpuSeconds ?? -1 >= 0, "rusage should come back with the exit")
     }
 
     @Test("Poll reaps, so a finished child does not look alive forever")
@@ -178,16 +179,16 @@ struct SpawnTests {
         Thread.sleep(forTimeInterval: 0.2)
         kill(child.pid, SIGKILL)
 
-        var code: Int32?
+        var completion: Spawn.Completion?
         let deadline = Date().addingTimeInterval(5)
         while Date() < deadline {
-            if let result = Spawn.poll(pid: child.pid) { code = result; break }
+            if let result = Spawn.poll(pid: child.pid) { completion = result; break }
             Thread.sleep(forTimeInterval: 0.02)
         }
 
         // 128 + SIGKILL, the shell convention, so it cannot be confused with a
         // workload that exited 9 on purpose.
-        #expect(code == 128 + SIGKILL)
+        #expect(completion?.exitCode == 128 + SIGKILL)
     }
 }
 
@@ -319,6 +320,7 @@ struct ProfileArtifactTests {
             ownPeakRAMBytes: Statistic(runs.map { Double($0.ownPeakRAMBytes) }),
             externalPeakRAMBytes: Statistic(runs.map { Double($0.externalPeakRAMBytes) }),
             peakCPU: Statistic(runs.map(\.peakCPU)),
+            cpuSeconds: Statistic(runs.map(\.cpuSeconds)),
             wallClockSeconds: Statistic(runs.map(\.wallClockSeconds)),
             diskReadBytes: Statistic(runs.map { Double($0.diskReadBytes) }),
             diskWrittenBytes: Statistic(runs.map { Double($0.diskWrittenBytes) }),
@@ -341,6 +343,7 @@ struct ProfileArtifactTests {
         RunResult(
             index: index, exitCode: exitCode, wallClockSeconds: 2.0,
             ownPeakRAMBytes: peak, externalPeakRAMBytes: 0, peakCPU: 1.1,
+            cpuSeconds: 1.8,
             diskReadBytes: 1024, diskWrittenBytes: 0, peakSwapOutsPerSecond: 0,
             worstThermal: .nominal, contendingCPU: 0.05, timedOut: timedOut,
             externalSettleTruncated: false, sampleCount: samples

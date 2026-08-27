@@ -349,6 +349,14 @@ truth (ARCHITECTURE #7).
   marker syntax was refused, because a substring scan counted the prose mention
   as a second marker; markers now count only when alone on a line
   (ARCHITECTURE #39). Writing the docs was a better test pass than the tests.
+- Note: two measurement errors found by a user reading output rather than by
+  any test. Used memory was understated ~1.2 GB by treating `active` as "not
+  reclaimable" — `inactive` mixes droppable file pages with anonymous dirty ones
+  that cost a swap (ARCHITECTURE #40). And published "Peak CPU 31%" made a
+  0.035 s command look heavy, because a burst shorter than the 50 ms sampling
+  window is averaged down; exact CPU time now comes from `wait4` rusage and
+  leads the table (#43). Both were visible to anyone comparing against Activity
+  Monitor or thinking about the number for a second. Neither had a failing test.
 - Note: still no `sitrep watch`, and `pmset -g log` sleep/wake parsing remains
   unbuilt from Milestone 3. Both carried into post-v1.
 

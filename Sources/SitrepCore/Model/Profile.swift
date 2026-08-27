@@ -55,7 +55,21 @@ public struct RunResult: Codable, Sendable, Equatable {
     /// Peak footprint attributable to declared external services, measured as
     /// the increase over their pre-run baseline.
     public let externalPeakRAMBytes: UInt64
+    /// Highest CPU seen in any one sampling window.
+    ///
+    /// **Window-dependent**, and therefore a weaker number than it looks. A
+    /// burst shorter than the sampling interval is averaged down: a 15 ms burst
+    /// at full core read through a 50 ms window reports ~30%. Useful for judging
+    /// how parallel a workload got; not a good answer to "what does this cost".
+    /// Use ``cpuSeconds`` for that.
     public let peakCPU: Double
+
+    /// Exact CPU time consumed, from the kernel's rusage at exit.
+    ///
+    /// Sampling-independent and free of window-averaging error, which makes it
+    /// the honest headline for CPU cost.
+    public let cpuSeconds: Double
+
     public let diskReadBytes: UInt64
     public let diskWrittenBytes: UInt64
     public let peakSwapOutsPerSecond: Double
@@ -119,6 +133,7 @@ public struct Profile: Codable, Sendable, Equatable {
     public let ownPeakRAMBytes: Statistic
     public let externalPeakRAMBytes: Statistic
     public let peakCPU: Statistic
+    public let cpuSeconds: Statistic
     public let wallClockSeconds: Statistic
     public let diskReadBytes: Statistic
     public let diskWrittenBytes: Statistic

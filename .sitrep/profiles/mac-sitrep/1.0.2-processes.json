@@ -1,0 +1,184 @@
+{
+  "capabilityGaps" : [
+    "thermal.temperature",
+    "thermal.fan",
+    "network.per_process",
+    "process.other_users",
+    "power.package"
+  ],
+  "command" : [
+    "sitrep",
+    "processes",
+    "--limit",
+    "10"
+  ],
+  "conditions" : {
+    "contended" : false,
+    "contendingCPU" : {
+      "max" : 0.10831258742661362,
+      "median" : 0.09702521917039107,
+      "min" : 0.06642081663388692,
+      "samples" : 5
+    },
+    "peakSwapOutsPerSecond" : 0,
+    "worstThermal" : "nominal"
+  },
+  "cpuSeconds" : {
+    "max" : 0.041103,
+    "median" : 0.034982,
+    "min" : 0.029567,
+    "samples" : 5
+  },
+  "diskReadBytes" : {
+    "max" : 49152,
+    "median" : 0,
+    "min" : 0,
+    "samples" : 5
+  },
+  "diskWrittenBytes" : {
+    "max" : 0,
+    "median" : 0,
+    "min" : 0,
+    "samples" : 5
+  },
+  "externalPeakRAMBytes" : {
+    "max" : 0,
+    "median" : 0,
+    "min" : 0,
+    "samples" : 5
+  },
+  "externalServices" : [
+
+  ],
+  "generatedAt" : "2026-08-27T01:31:11Z",
+  "machine" : {
+    "coreCount" : 10,
+    "cpuBrand" : "Apple M4",
+    "hardwareModel" : "Mac16,10",
+    "osBuild" : "25G83",
+    "osVersion" : "26.6.2",
+    "physicalMemoryBytes" : 17179869184
+  },
+  "overhead" : {
+    "cpuSeconds" : 0.467881917,
+    "peakFootprintBytes" : 4080144,
+    "sampleCount" : 40,
+    "sampleIntervalSeconds" : 0.05
+  },
+  "ownPeakRAMBytes" : {
+    "max" : 2425216,
+    "median" : 2425216,
+    "min" : 2392448,
+    "samples" : 5
+  },
+  "peakCPU" : {
+    "max" : 0.31602160258010753,
+    "median" : 0.30590083768830245,
+    "min" : 0.2138338994478183,
+    "samples" : 5
+  },
+  "peakRAMBytes" : {
+    "max" : 2425216,
+    "median" : 2425216,
+    "min" : 2392448,
+    "samples" : 5
+  },
+  "project" : "mac-sitrep",
+  "runs" : [
+    {
+      "contendingCPU" : 0.07106410631594241,
+      "cpuSeconds" : 0.030859,
+      "diskReadBytes" : 0,
+      "diskWrittenBytes" : 0,
+      "exitCode" : 0,
+      "externalPeakRAMBytes" : 0,
+      "externalSettleTruncated" : false,
+      "index" : 0,
+      "ownPeakRAMBytes" : 2392448,
+      "peakCPU" : 0.2138338994478183,
+      "peakSwapOutsPerSecond" : 0,
+      "sampleCount" : 8,
+      "timedOut" : false,
+      "wallClockSeconds" : 0.5626699924468994,
+      "worstThermal" : "nominal"
+    },
+    {
+      "contendingCPU" : 0.06642081663388692,
+      "cpuSeconds" : 0.034982,
+      "diskReadBytes" : 0,
+      "diskWrittenBytes" : 0,
+      "exitCode" : 0,
+      "externalPeakRAMBytes" : 0,
+      "externalSettleTruncated" : false,
+      "index" : 1,
+      "ownPeakRAMBytes" : 2425216,
+      "peakCPU" : 0.31602160258010753,
+      "peakSwapOutsPerSecond" : 0,
+      "sampleCount" : 8,
+      "timedOut" : false,
+      "wallClockSeconds" : 0.5784149169921875,
+      "worstThermal" : "nominal"
+    },
+    {
+      "contendingCPU" : 0.09702521917039107,
+      "cpuSeconds" : 0.029567,
+      "diskReadBytes" : 0,
+      "diskWrittenBytes" : 0,
+      "exitCode" : 0,
+      "externalPeakRAMBytes" : 0,
+      "externalSettleTruncated" : false,
+      "index" : 2,
+      "ownPeakRAMBytes" : 2425216,
+      "peakCPU" : 0.30590083768830245,
+      "peakSwapOutsPerSecond" : 0,
+      "sampleCount" : 8,
+      "timedOut" : false,
+      "wallClockSeconds" : 0.5726140737533569,
+      "worstThermal" : "nominal"
+    },
+    {
+      "contendingCPU" : 0.10091754038155369,
+      "cpuSeconds" : 0.041103,
+      "diskReadBytes" : 49152,
+      "diskWrittenBytes" : 0,
+      "exitCode" : 0,
+      "externalPeakRAMBytes" : 0,
+      "externalSettleTruncated" : false,
+      "index" : 3,
+      "ownPeakRAMBytes" : 2425216,
+      "peakCPU" : 0.3153794681556122,
+      "peakSwapOutsPerSecond" : 0,
+      "sampleCount" : 8,
+      "timedOut" : false,
+      "wallClockSeconds" : 0.5892000198364258,
+      "worstThermal" : "nominal"
+    },
+    {
+      "contendingCPU" : 0.10831258742661362,
+      "cpuSeconds" : 0.036294,
+      "diskReadBytes" : 0,
+      "diskWrittenBytes" : 0,
+      "exitCode" : 0,
+      "externalPeakRAMBytes" : 0,
+      "externalSettleTruncated" : false,
+      "index" : 4,
+      "ownPeakRAMBytes" : 2425216,
+      "peakCPU" : 0.29527516508013774,
+      "peakSwapOutsPerSecond" : 0,
+      "sampleCount" : 8,
+      "timedOut" : false,
+      "wallClockSeconds" : 0.5752149820327759,
+      "worstThermal" : "nominal"
+    }
+  ],
+  "scenario" : "processes",
+  "schemaVersion" : 1,
+  "toolVersion" : "1.0.2",
+  "version" : "1.0.2",
+  "wallClockSeconds" : {
+    "max" : 0.5892000198364258,
+    "median" : 0.5752149820327759,
+    "min" : 0.5626699924468994,
+    "samples" : 5
+  }
+}

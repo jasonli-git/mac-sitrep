@@ -36,7 +36,13 @@ public enum MarkdownRenderer {
             )
         }
 
-        lines.append("| Peak CPU | \(statistic(profile.peakCPU, percent)) |")
+        lines.append("| CPU time | \(statistic(profile.cpuSeconds, seconds)) |")
+        // Labelled with the window because the figure depends on it: a burst
+        // shorter than the sampling interval is averaged down.
+        lines.append(
+            "| Peak CPU <sub>(per \(Int(profile.overhead.sampleIntervalSeconds * 1000)) ms window)</sub> "
+                + "| \(statistic(profile.peakCPU, percent)) |"
+        )
         lines.append("| Wall clock | \(statistic(profile.wallClockSeconds, seconds)) |")
         if profile.diskReadBytes.max > 0 {
             lines.append("| Disk read | \(statistic(profile.diskReadBytes, bytes)) |")
@@ -121,7 +127,11 @@ public enum MarkdownRenderer {
     }
 
     static func seconds(_ value: Double) -> String {
-        value < 10 ? String(format: "%.2f s", value) : String(format: "%.0f s", value)
+        // Three decimals below a second: CPU time for a short command is tens of
+        // milliseconds, and "0.02 s" loses most of the signal.
+        if value < 1 { return String(format: "%.3f s", value) }
+        if value < 10 { return String(format: "%.2f s", value) }
+        return String(format: "%.0f s", value)
     }
 
     /// Median with the range in parentheses, omitting the range when a

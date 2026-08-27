@@ -3,6 +3,22 @@
 All notable changes to mac-sitrep. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.0.2] — 2026-08-27
+
+### Added
+
+- Profiles record exact CPU time from the child's `wait4` rusage, and the
+  published block leads with it. Sampled peak CPU now carries the window that
+  produced it — "Peak CPU (per 50 ms window)".
+
+### Fixed
+
+- Published "Peak CPU 31%" made a trivial command look heavy. `sitrep processes`
+  consumes 0.035 s of CPU, but it does so in bursts shorter than the 50 ms
+  sampling window, which averages a near-full core down to ~31%. A sampled peak
+  is partly a property of the sampling rate; the exact figure is not, and now
+  leads. `compare` gained CPU time as a regression signal for the same reason.
+
 ## [1.0.1] — 2026-08-27
 
 ### Fixed
