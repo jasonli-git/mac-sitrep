@@ -31,11 +31,15 @@ public enum SystemSampler {
                 inactive: UInt64(vm.inactive_count) * pageSize,
                 wired: UInt64(vm.wire_count) * pageSize,
                 compressed: UInt64(vm.compressor_page_count) * pageSize,
-                free: UInt64(vm.free_count) * pageSize
+                free: UInt64(vm.free_count) * pageSize,
+                anonymous: UInt64(vm.internal_page_count) * pageSize,
+                fileBacked: UInt64(vm.external_page_count) * pageSize,
+                purgeable: UInt64(vm.purgeable_count) * pageSize
             )
         } else {
             pages = SystemReading.MemoryPages(
-                active: 0, inactive: 0, wired: 0, compressed: 0, free: 0
+                active: 0, inactive: 0, wired: 0, compressed: 0, free: 0,
+                anonymous: 0, fileBacked: 0, purgeable: 0
             )
         }
 

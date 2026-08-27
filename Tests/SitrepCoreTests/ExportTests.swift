@@ -405,16 +405,23 @@ struct ProfileComparisonTests {
 @Suite("Fit prediction")
 struct FitPredictionTests {
 
-    private func sample(freeGB: Double, inactiveGB: Double) -> Sample {
-        let free = UInt64(freeGB * Double(1 << 30))
-        let inactive = UInt64(inactiveGB * Double(1 << 30))
+    /// Builds a sample with a given amount of memory committed to running work.
+    ///
+    /// Parameterized on *used* rather than free/inactive because available is
+    /// now derived as total − used (ARCHITECTURE #40), so used is the only knob
+    /// that changes the prediction.
+    private func sample(usedGB: Double, totalGB: Double = 16) -> Sample {
+        let total = UInt64(totalGB * Double(1 << 30))
+        let used = UInt64(usedGB * Double(1 << 30))
 
         return Sample(
             timestamp: Date(), intervalSeconds: 1,
             memory: .init(
-                totalBytes: 16 << 30, usedBytes: 8 << 30, activeBytes: 8 << 30,
-                inactiveBytes: inactive, wiredBytes: 0, compressedBytes: 0,
-                freeBytes: free, swapUsedBytes: 0, swapTotalBytes: 0,
+                totalBytes: total, usedBytes: used, activeBytes: used,
+                inactiveBytes: 0, wiredBytes: 0, compressedBytes: 0,
+                freeBytes: total - used,
+                appMemoryBytes: used, cachedFilesBytes: 0,
+                swapUsedBytes: 0, swapTotalBytes: 0,
                 pressure: .normal, swapOutsPerSecond: 0, pressureSwapOutsPerSecond: 0
             ),
             cpu: .init(
@@ -437,7 +444,7 @@ struct FitPredictionTests {
     func comfortableWorkloadFits() {
         let prediction = FitPrediction(
             profile: makeProfile(runs: [makeRun(peak: 1 << 30)]),
-            sample: sample(freeGB: 2, inactiveGB: 6)
+            sample: sample(usedGB: 8)
         )
 
         #expect(prediction.verdict == .fits)
@@ -448,7 +455,7 @@ struct FitPredictionTests {
     func oversizedWorkloadWillSwap() {
         let prediction = FitPrediction(
             profile: makeProfile(runs: [makeRun(peak: 12 << 30)]),
-            sample: sample(freeGB: 1, inactiveGB: 1)
+            sample: sample(usedGB: 14)
         )
 
         #expect(prediction.verdict == .willSwap)
@@ -462,21 +469,22 @@ struct FitPredictionTests {
         // swap, which is worth saying rather than reporting a clean pass.
         let prediction = FitPrediction(
             profile: makeProfile(runs: [makeRun(peak: UInt64(3.9 * Double(1 << 30)))]),
-            sample: sample(freeGB: 2, inactiveGB: 2)
+            sample: sample(usedGB: 12)   // 4 GB available, needs 3.9
         )
 
         #expect(prediction.verdict == .tight)
     }
 
-    @Test("Available counts inactive pages, not just free")
-    func availableIncludesInactive() {
-        // Free alone is far too pessimistic on macOS, which deliberately keeps
-        // very little memory actually free.
-        let prediction = FitPrediction(
-            profile: makeProfile(), sample: sample(freeGB: 0.5, inactiveGB: 7.5)
-        )
+    @Test("Available is total minus used, agreeing with the status display")
+    func availableAgreesWithUsed() {
+        // Not free + inactive: `inactive` holds anonymous pages that cost a
+        // swap to reclaim, so counting them as available overstates what a new
+        // workload can actually get (ARCHITECTURE #40).
+        let s = sample(usedGB: 8)
+        let prediction = FitPrediction(profile: makeProfile(), sample: s)
 
-        #expect(prediction.availableBytes == 8 << 30)
+        #expect(prediction.availableBytes == s.memory.availableBytes)
+        #expect(prediction.availableBytes + s.memory.usedBytes == s.memory.totalBytes)
     }
 }
 

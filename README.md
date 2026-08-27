@@ -78,11 +78,12 @@ DISK          28 GB free            read idle · write idle
 NETWORK                             in idle · out idle
 ```
 
-Two reporting choices worth knowing about. Memory *used* is active + wired +
-compressed, which runs several GB below what `top` shows — `top` counts cache the
-kernel reclaims on demand. And swap is judged on its **rate**, not the swap file
-size: macOS grows that file and never cleanly shrinks it, so a level-based
-zero-swap policy would read as permanently violated.
+Two reporting choices worth knowing about. Memory *used* is app memory + wired +
+compressed, which **matches Activity Monitor** and runs several GB below what
+`top` shows — `top` counts the file cache the kernel reclaims on demand. And swap
+is judged on its **rate**, not the swap file size: macOS grows that file and
+never cleanly shrinks it, so a level-based zero-swap policy would read as
+permanently violated.
 
 `sitrep doctor` also reports what it *cannot* measure, and why:
 

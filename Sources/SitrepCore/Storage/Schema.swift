@@ -10,7 +10,7 @@ import Foundation
 public enum Schema {
 
     /// Bumped whenever the DDL below changes.
-    public static let version = 1
+    public static let version = 2
 
     public static func migrate(_ database: Database) throws {
         try database.execute(
@@ -29,13 +29,47 @@ public enum Schema {
                 statement.bind(1, Self.version)
                 try statement.run()
             }
+        } else if current == 1 {
+            try migrateV1toV2(database)
         } else {
-            // No forward migrations exist yet. When the first one does, it slots
-            // in here as a version-to-version step rather than a rebuild.
             throw Database.Failure.step(
                 "database is at schema version \(current), expected \(Self.version); "
                     + "delete the file to rebuild"
             )
+        }
+    }
+
+    /// v1 → v2: the definition of `mem_used` changed.
+    ///
+    /// Until 2026-08-27 used memory was `active + wired + compressed`, which
+    /// under-reported by the anonymous pages sitting on the inactive queue
+    /// (ARCHITECTURE #40). Rows written under the old definition are not
+    /// comparable with new ones, and a `history --since 7d` spanning the change
+    /// would silently average two different quantities together — exactly the
+    /// kind of invisible wrongness this project exists to prevent.
+    ///
+    /// So the system samples are dropped rather than migrated: there is no
+    /// arithmetic that recovers the missing pages after the fact. Machine
+    /// identity, events, and the daemon's own self-measurements are unaffected
+    /// and survive. An event records why the gap exists.
+    static func migrateV1toV2(_ database: Database) throws {
+        try database.transaction {
+            try database.execute("DELETE FROM sample")
+
+            let event = try database.prepare(
+                "INSERT INTO event(ts, kind, detail) VALUES(?, 'schema_migration', ?)"
+            )
+            event.bind(1, Date().timeIntervalSince1970)
+            event.bind(
+                2,
+                "schema v1 → v2: system samples cleared because the definition of "
+                    + "used memory changed to match Activity Monitor"
+            )
+            try event.run()
+
+            let version = try database.prepare("UPDATE schema_version SET version = ?")
+            version.bind(1, Self.version)
+            try version.run()
         }
     }
 

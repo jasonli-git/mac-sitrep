@@ -146,11 +146,14 @@ public struct FitPrediction: Sendable {
     public init(profile: Profile, sample: Sample) {
         self.profile = profile
 
-        // Available means what can be handed to a new workload without swapping:
-        // free pages plus inactive ones, which the kernel reclaims on demand.
-        // Using `free` alone would be far too pessimistic on a Mac, which
-        // deliberately keeps very little memory actually free.
-        availableBytes = sample.memory.freeBytes + sample.memory.inactiveBytes
+        // Everything not already committed to running work. Defined as
+        // total − used so it agrees with what `sitrep` displays.
+        //
+        // The earlier definition, free + inactive, was wrong in the same way the
+        // old `used` was: `inactive` holds anonymous pages that belong to
+        // processes, and reclaiming those costs a compression or a swap. They
+        // are not available (ARCHITECTURE #40).
+        availableBytes = sample.memory.availableBytes
         requiredBytes = UInt64(profile.peakRAMBytes.max)
 
         if requiredBytes > availableBytes {

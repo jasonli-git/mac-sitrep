@@ -28,7 +28,9 @@ private func makeSample(
         memory: .init(
             totalBytes: 16 << 30, usedBytes: memoryUsed, activeBytes: memoryUsed,
             inactiveBytes: 0, wiredBytes: 0, compressedBytes: 0,
-            freeBytes: (16 << 30) - memoryUsed, swapUsedBytes: 0, swapTotalBytes: 0,
+            freeBytes: (16 << 30) - memoryUsed,
+            appMemoryBytes: memoryUsed, cachedFilesBytes: 0,
+            swapUsedBytes: 0, swapTotalBytes: 0,
             pressure: .normal, swapOutsPerSecond: swapOuts, pressureSwapOutsPerSecond: 0
         ),
         cpu: .init(
@@ -63,6 +65,27 @@ struct DatabaseTests {
         // Reopening must not attempt to recreate tables.
         let second = try SampleStore.open(path: path)
         #expect(try Schema.readVersion(second.connection) == Schema.version)
+    }
+
+    @Test("A v1 database migrates by clearing incomparable samples")
+    func v1MigratesByClearingSamples() throws {
+        // The v1 → v2 change redefined used memory, so old rows cannot be mixed
+        // with new ones. Samples are dropped; events and machine identity are not.
+        try withStore { store in
+            try store.insert(makeSample(at: Date().addingTimeInterval(-60)), health: .healthy)
+            try store.record(.daemonStart, detail: "before migration")
+            #expect(try store.sampleCount(resolution: .raw) == 1)
+
+            try store.connection.execute("UPDATE schema_version SET version = 1")
+            try Schema.migrate(store.connection)
+
+            #expect(try Schema.readVersion(store.connection) == Schema.version)
+            #expect(try store.sampleCount(resolution: .raw) == 0, "samples cleared")
+
+            let events = try store.events(since: Date().addingTimeInterval(-600))
+            #expect(events.contains { $0.kind == "daemon_start" }, "events survive")
+            #expect(events.contains { $0.kind == "schema_migration" }, "the gap is explained")
+        }
     }
 
     @Test("Large UInt64 values survive the round trip")

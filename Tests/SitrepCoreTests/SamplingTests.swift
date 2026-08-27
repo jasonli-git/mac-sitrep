@@ -39,18 +39,35 @@ struct SystemSamplerTests {
         #expect(sample.memory.totalBytes >= bucketSum)
     }
 
-    @Test("Used memory excludes reclaimable pages")
-    func usedMemoryExcludesReclaimable() throws {
-        // Deliberately smaller than top's total-minus-free. See ARCHITECTURE #18.
+    @Test("Used memory is app + wired + compressed, excluding the file cache")
+    func usedMemoryMatchesActivityMonitor() throws {
+        // Regression guard for ARCHITECTURE #40. The obvious formula —
+        // active + wired + compressed — under-reports by the anonymous pages
+        // sitting on the inactive queue, which cost a compression or a swap to
+        // reclaim and are therefore not free. On a real 16 GB Mac that gap was
+        // 1.2 GB and made the figure disagree with Activity Monitor.
         let sample = try #require(SystemSampler.sample(interval: Self.interval))
-        let topStyleUsed = sample.memory.totalBytes - sample.memory.freeBytes
 
-        #expect(sample.memory.usedBytes < topStyleUsed)
         #expect(
             sample.memory.usedBytes
-                == sample.memory.activeBytes + sample.memory.wiredBytes
+                == sample.memory.appMemoryBytes + sample.memory.wiredBytes
                     + sample.memory.compressedBytes
         )
+
+        // Still below top's total − free, which counts the reclaimable cache.
+        #expect(sample.memory.usedBytes < sample.memory.totalBytes - sample.memory.freeBytes)
+
+        // And at or above the old formula, since app memory ⊇ active anonymous.
+        let oldFormula = sample.memory.activeBytes + sample.memory.wiredBytes
+            + sample.memory.compressedBytes
+        #expect(sample.memory.usedBytes + (64 << 20) >= oldFormula)
+    }
+
+    @Test("Available memory agrees with used")
+    func availableAgreesWithUsed() throws {
+        let sample = try #require(SystemSampler.sample(interval: Self.interval))
+        #expect(sample.memory.availableBytes + sample.memory.usedBytes
+            == sample.memory.totalBytes)
     }
 
     @Test("Rates are non-negative and the interval is recorded")
@@ -244,7 +261,9 @@ struct HealthStateTests {
             memory: .init(
                 totalBytes: total, usedBytes: used, activeBytes: used,
                 inactiveBytes: 0, wiredBytes: 0, compressedBytes: 0,
-                freeBytes: total - used, swapUsedBytes: 0, swapTotalBytes: 0,
+                freeBytes: total - used,
+                appMemoryBytes: used, cachedFilesBytes: 0,
+                swapUsedBytes: 0, swapTotalBytes: 0,
                 pressure: pressure, swapOutsPerSecond: swapOutsPerSecond,
                 pressureSwapOutsPerSecond: 0
             ),

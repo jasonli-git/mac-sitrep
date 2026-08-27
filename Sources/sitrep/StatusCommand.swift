@@ -57,9 +57,15 @@ struct Status: ParsableCommand {
             "\(Format.bytes(memory.usedBytes)) / \(Format.bytes(memory.totalBytes))",
             "\(Format.percent(memory.usedFraction)) used"
         ))
+        // Labelled to match Activity Monitor's Memory tab, so the two can be
+        // compared directly rather than looking like they disagree.
+        lines.append(row(
+            "  app", Format.bytes(memory.appMemoryBytes),
+            "wired \(Format.bytes(memory.wiredBytes))"
+        ))
         lines.append(row(
             "  compressed", Format.bytes(memory.compressedBytes),
-            "wired \(Format.bytes(memory.wiredBytes))"
+            "cached files \(Format.bytes(memory.cachedFilesBytes))"
         ))
         // Swap shows the rate first: the file size is sticky and a non-zero
         // total with a zero rate is a healthy machine (ARCHITECTURE #6).

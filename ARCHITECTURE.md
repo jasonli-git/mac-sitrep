@@ -75,6 +75,9 @@ never a participant in the sampling path, so it can be absent entirely.
 | 37 | `can-i-run` defines available memory as free + inactive | Inactive pages are reclaimable on demand, and macOS deliberately keeps very little memory actually free — using `free` alone would report that nothing fits on a perfectly healthy machine. Deliberately a claim about *this* machine only; predicting fit on unseen hardware is a permanent non-goal. |
 | 38 | Recommended-RAM rounding granularity scales with magnitude | Rounding everything up to whole gigabytes reported "1.0 GB recommended" for a tool whose measured peak was 2.2 MB — technically true, useless in practice, and corrosive to the credibility of every other number printed beside it. Steps are 8 MB below 64 MB, 64 MB below 1 GB, and 1 GB above. |
 | 39 | Injection markers are recognized only when alone on a line | Found by this project's own README: the Usage section explains the marker syntax in a sentence, and a substring scan counted that as a second start marker and refused to inject. Any project documenting how injection works would hit the same wall. Our writer always emits markers on their own line, so requiring it costs nothing. Indented markers still count; markers inside prose do not. |
+| 40 | Supersedes #18 — used memory is **app memory + wired + compressed**, matching Activity Monitor | #18 excluded reclaimable pages, which was the right instinct applied with the wrong proxy. It used `active`, but `inactive` is not uniformly reclaimable: it holds file-backed pages (free to drop) *and* anonymous pages owned by processes and dirty, which cost a compression or a swap to reclaim. Excluding the latter under-reported by 1.2 GB on a real 16 GB Mac — 11 GB against Activity Monitor's 12.8 GB — for no defensible reason. App memory is `internal_page_count − purgeable_count`; verified against `vm_stat` at 4.9 GB vs 4.88 GB. Matching Activity Monitor is a feature, not a coincidence: a reader can cross-check against a tool they already trust. Still below `top`'s total − free, which counts the file cache. |
+| 41 | Available memory is total − used, replacing free + inactive | Same error in the same place: counting `inactive` as available treats anonymous dirty pages as free when obtaining them costs a swap. Deriving available from used keeps `sitrep` and `can-i-run` telling the same story, and means one definition governs both. |
+| 42 | Redefining a stored metric bumps the schema and clears the affected rows | The v1 → v2 change altered what `mem_used` means. No arithmetic recovers the missing pages after the fact, and a `history --since 7d` spanning the change would silently average two different quantities — the invisible wrongness this project exists to prevent. Samples are dropped; machine identity, events, and self-measurements survive, and an event records why the gap is there. History is disposable by design (#7), which is what makes this affordable. |
 
 ## Module Layout
 
@@ -150,7 +153,7 @@ Tests/
     ExportTests.swift               # rendering, injection, badge, compare, fit
 ```
 
-154 tests across twenty-eight suites.
+156 tests across twenty-eight suites.
 
 **Dependency rule.** `SitrepCore` imports only Darwin, Foundation, and IOKit —
 never `ArgumentParser`, never CLI concerns. Executable targets depend on
@@ -257,7 +260,7 @@ learned per-project baselines replace most of them post-v1.
 
 ## Storage schema — built
 
-Defined in `Storage/Schema.swift`, version 1.
+Defined in `Storage/Schema.swift`, version 2.
 
 ```sql
 machine(id, hw_model, cpu_brand, ram_bytes, core_count, os_version, os_build,
@@ -437,9 +440,10 @@ rather than decorative.
   so a fast-growing process can briefly report a peak below its current
   footprint. `Rusage` returns the raw field; every consumer must derive a peak
   with `max()`. Decision #17.
-- **Reported memory used will not match `top`.** Ours is smaller by the
-  reclaimable pages `top` counts — decision #18, not a bug. The components are
-  reported separately so the other definition is recomputable.
+- **Reported memory used matches Activity Monitor but not `top`.** `top` counts
+  the reclaimable file cache and reads ~15 GB on a 16 GB Mac; ours excludes it
+  (#40). Every component is reported separately so `top`'s definition stays
+  recomputable.
 - **`sitrep` and `sitrep processes` block for the sampling interval.**
   Unavoidable for a one-shot rate; 500 ms by default, tunable with `--interval`.
   Shorter intervals make CPU utilization noisy as scheduler quanta start to

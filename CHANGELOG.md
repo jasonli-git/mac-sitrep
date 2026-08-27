@@ -3,6 +3,26 @@
 All notable changes to mac-sitrep. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.0.1] — 2026-08-27
+
+### Fixed
+
+- **Used memory was understated by ~1.2 GB.** The formula was
+  `active + wired + compressed`, but `inactive` is not uniformly reclaimable: it
+  holds file-backed pages (free to drop) *and* anonymous pages owned by processes
+  and dirty, which cost a compression or a swap to reclaim. Excluding the latter
+  reported 11 GB where Activity Monitor showed 12.8 GB. Used memory is now
+  app memory + wired + compressed, matching Activity Monitor, and `sitrep` labels
+  its rows to match that vocabulary so the two can be compared directly.
+  Verified against `vm_stat` independently. Found by a user comparing the two
+  side by side.
+- Available memory is now total − used, replacing free + inactive, which had the
+  same flaw: it counted anonymous dirty pages as obtainable when getting them
+  costs a swap. `can-i-run` and `sitrep` now agree by construction.
+- Database schema bumped to v2. Rows written under the old definition are cleared
+  on upgrade rather than silently mixed with new ones; events, machine identity,
+  and self-measurements survive, and an event records why the gap exists.
+
 ## [1.0.0] — 2026-08-27
 
 v1 complete: the path from running a workload to a published, verifiable

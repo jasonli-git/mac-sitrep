@@ -40,23 +40,41 @@ public struct SystemReading: Sendable {
         public let wired: UInt64
         public let compressed: UInt64
         public let free: UInt64
+        /// Anonymous pages — memory owned by processes, not backed by a file.
+        public let anonymous: UInt64
+        /// File-backed pages: the disk cache.
+        public let fileBacked: UInt64
+        /// Pages an app has told the kernel it may discard without writing back.
+        public let purgeable: UInt64
 
-        /// Memory held by running work: active + wired + compressed.
+        /// Memory attributable to running applications.
         ///
-        /// macOS has no single authoritative "used" figure, and this one is
-        /// **deliberately smaller than `top`'s**. `top` computes used as
-        /// total − free, which counts inactive and file-backed cache the kernel
-        /// can reclaim on demand; on a 16 GB Mac that reads ~15 GB used and
-        /// implies a crisis that is not happening.
+        /// Matches Activity Monitor's "App Memory" — anonymous pages minus what
+        /// apps have marked discardable.
+        public var appMemory: UInt64 { anonymous >= purgeable ? anonymous - purgeable : 0 }
+
+        /// The disk cache, which the kernel reclaims on demand.
+        public var cachedFiles: UInt64 { fileBacked + purgeable }
+
+        /// Memory that cannot be reclaimed without compressing or swapping:
+        /// app memory + wired + compressed.
         ///
-        /// Excluding reclaimable pages makes this the better predictor of the
-        /// thing this project cares about — whether the machine is approaching
-        /// the point of swapping. Memory pressure, reported alongside, remains
-        /// the authoritative signal; this is the magnitude behind it.
+        /// This matches Activity Monitor's "Memory Used", which means a reader
+        /// can cross-check it against a tool they already trust.
         ///
-        /// Every component is reported separately so a reader who wants `top`'s
-        /// definition can compute it. See ARCHITECTURE #18.
-        public var used: UInt64 { active + wired + compressed }
+        /// It is still deliberately smaller than `top`'s total − free, which
+        /// counts the file cache and reads ~15 GB on a 16 GB Mac — implying a
+        /// crisis that is not happening.
+        ///
+        /// The subtlety, and the reason this was wrong until 2026-08-27: the
+        /// obvious formula is `active + wired + compressed`, but `inactive` is
+        /// not uniformly reclaimable. It holds both file-backed pages (free to
+        /// drop) *and* anonymous pages that belong to processes and are dirty.
+        /// Reclaiming the latter costs a compression or a swap, so excluding
+        /// them understated used memory by 1.2 GB on a real 16 GB machine and
+        /// made the number disagree with Activity Monitor for no good reason.
+        /// See ARCHITECTURE #40, which supersedes #18.
+        public var used: UInt64 { appMemory + wired + compressed }
     }
 
     public struct GPUReading: Sendable, Equatable {
@@ -95,6 +113,10 @@ public struct Sample: Sendable, Encodable {
         public let wiredBytes: UInt64
         public let compressedBytes: UInt64
         public let freeBytes: UInt64
+        /// Activity Monitor's "App Memory".
+        public let appMemoryBytes: UInt64
+        /// Activity Monitor's "Cached Files" — reclaimable on demand.
+        public let cachedFilesBytes: UInt64
 
         public let swapUsedBytes: UInt64
         public let swapTotalBytes: UInt64
@@ -114,6 +136,16 @@ public struct Sample: Sendable, Encodable {
 
         public var usedFraction: Double {
             totalBytes == 0 ? 0 : Double(usedBytes) / Double(totalBytes)
+        }
+
+        /// Memory obtainable without compressing or swapping: everything that is
+        /// not already committed to running work.
+        ///
+        /// Defined as total − used so it stays consistent with ``usedBytes``.
+        /// The earlier definition, free + inactive, counted anonymous inactive
+        /// pages as available when reclaiming those costs a swap.
+        public var availableBytes: UInt64 {
+            totalBytes > usedBytes ? totalBytes - usedBytes : 0
         }
     }
 
@@ -188,6 +220,8 @@ extension Sample {
             wiredBytes: pages.wired,
             compressedBytes: pages.compressed,
             freeBytes: pages.free,
+            appMemoryBytes: pages.appMemory,
+            cachedFilesBytes: pages.cachedFiles,
             swapUsedBytes: current.swap?.used ?? 0,
             swapTotalBytes: current.swap?.total ?? 0,
             pressure: current.pressure,
