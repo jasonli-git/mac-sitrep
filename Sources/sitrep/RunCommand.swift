@@ -152,9 +152,15 @@ struct Run: ParsableCommand {
             lines.append("  " + row("  own tree", profile.ownPeakRAMBytes, bytes))
             lines.append("  " + row("  external", profile.externalPeakRAMBytes, bytes))
         }
+        lines.append(
+            "  cpu load        \(profile.cpuLoad.label) · "
+                + "\(Format.percent(profile.machineShare)) of "
+                + "\(profile.machine.coreCount) cores · "
+                + String(format: "%.2f", profile.averageCoresUsed) + " cores avg"
+        )
         lines.append("  " + row("cpu time", profile.cpuSeconds, Format.seconds))
         lines.append("  " + row("peak CPU", profile.peakCPU, percent)
-            + "   per \(Int(profile.overhead.sampleIntervalSeconds * 1000)) ms window")
+            + "   of one core, per \(Int(profile.overhead.sampleIntervalSeconds * 1000)) ms window")
         lines.append("  " + row("wall clock", profile.wallClockSeconds, Format.seconds))
         lines.append("  " + row("disk read", profile.diskReadBytes, bytes))
         lines.append("  " + row("disk write", profile.diskWrittenBytes, bytes))

@@ -4,13 +4,14 @@ import Testing
 
 private func makeRun(
     index: Int = 0, peak: UInt64 = 400 << 20, external: UInt64 = 0,
-    cpu: Double = 1.1, wall: Double = 2.0, swapOuts: Double = 0,
+    cpu: Double = 1.1, wall: Double = 2.0, cpuSeconds: Double? = nil,
+    swapOuts: Double = 0,
     thermal: ThermalState = .nominal, samples: Int = 40
 ) -> RunResult {
     RunResult(
         index: index, exitCode: 0, wallClockSeconds: wall,
         ownPeakRAMBytes: peak, externalPeakRAMBytes: external, peakCPU: cpu,
-        cpuSeconds: wall * 0.9,
+        cpuSeconds: cpuSeconds ?? wall * 0.9,
         diskReadBytes: 1 << 20, diskWrittenBytes: 0,
         peakSwapOutsPerSecond: swapOuts, worstThermal: thermal,
         contendingCPU: 0.05, timedOut: false,
@@ -128,6 +129,67 @@ struct MarkdownRendererTests {
         // Printing "400 MB (400 MB – 400 MB)" is noise.
         let block = MarkdownRenderer.requirementsBlock(makeProfile())
         #expect(!block.contains("400 MB _(400 MB"))
+    }
+
+    @Test("CPU load is labelled from machine share, not peak")
+    func cpuLoadDerivesFromMachineShare() {
+        // A percentage of one core cannot carry a label: whether a third of a
+        // core is "moderate" depends on how many cores exist. Machine share can.
+        #expect(Profile.CPULoad(machineShare: 0.005) == .negligible)
+        #expect(Profile.CPULoad(machineShare: 0.05) == .light)
+        #expect(Profile.CPULoad(machineShare: 0.20) == .moderate)
+        #expect(Profile.CPULoad(machineShare: 0.50) == .heavy)
+        #expect(Profile.CPULoad(machineShare: 0.90) == .saturating)
+    }
+
+    @Test("A fully occupied core is not called light")
+    func oneWholeCoreIsAtLeastModerate() {
+        // Measured: one core pinned for two seconds on a 10-core M4 is 9.9% of
+        // the machine. A flat 10% light ceiling reported that as "Light", which
+        // understates a workload burning a core solid.
+        #expect(Profile.CPULoad(machineShare: 1.0 / 10) == .moderate, "one core of ten")
+        #expect(Profile.CPULoad(machineShare: 1.0 / 4) == .moderate, "one core of four")
+        #expect(Profile.CPULoad(machineShare: 8.0 / 10) == .saturating, "eight cores of ten")
+    }
+
+    @Test("A busy single core on a 10-core machine is not called heavy")
+    func oneCoreOfTenIsNotHeavy() {
+        // The real measured case: `sitrep processes` peaks at 31% of one core
+        // but consumes only 0.034 s over 0.575 s wall — 0.06 cores, 0.6% of a
+        // 10-core machine. Peak read as a heavy tool; the truth is negligible.
+        let profile = makeProfile(runs: [makeRun(cpu: 0.31, wall: 0.575, cpuSeconds: 0.034)])
+
+        #expect(abs(profile.averageCoresUsed - 0.059) < 0.005)
+        #expect(profile.machineShare < 0.01)
+        #expect(profile.cpuLoad == .negligible)
+    }
+
+    @Test("Average cores used is CPU time over wall clock")
+    func averageCoresIsExact() {
+        // Sampling-independent, unlike peak: both inputs are exact.
+        let profile = makeProfile(runs: [makeRun(cpu: 9.9, wall: 2.0)])
+        // makeRun sets cpuSeconds = wall * 0.9 = 1.8 -> 1.8 / 2.0 = 0.9 cores
+        #expect(abs(profile.averageCoresUsed - 0.9) < 0.001)
+    }
+
+    @Test("The label never appears without its number")
+    func labelAlwaysCarriesItsNumber() {
+        // A word alone invites trust in a judgement whose thresholds the reader
+        // cannot see.
+        let block = MarkdownRenderer.requirementsBlock(makeProfile())
+
+        #expect(block.contains("CPU load"))
+        #expect(block.contains("-core machine"), "the denominator must be stated")
+        #expect(block.contains("of one core"), "peak must name its denominator too")
+    }
+
+    @Test("Small percentages keep a decimal")
+    func smallPercentagesKeepPrecision() {
+        // Rounding 0.6% to "1%" nearly doubles it, and machine share for a light
+        // tool lives entirely in that range.
+        #expect(MarkdownRenderer.percent(0.006) == "0.6%")
+        #expect(MarkdownRenderer.percent(0.099) == "9.9%")
+        #expect(MarkdownRenderer.percent(0.31) == "31%")
     }
 
     @Test("CPU time leads, and peak CPU discloses its window")

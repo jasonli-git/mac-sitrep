@@ -3,6 +3,30 @@
 All notable changes to mac-sitrep. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.1.0] — 2026-08-27
+
+### Added
+
+- Profiles carry a plain-language **CPU load** reading — Negligible, Light,
+  Moderate, Heavy, Saturating — derived from share of the whole machine
+  (`CPU time ÷ wall clock ÷ cores`), and rendered beside the percentage and core
+  count rather than instead of them. Peak CPU could not carry the label: it is a
+  share of *one core* and is averaged down by the sampling window, so identical
+  software sampled faster would earn a heavier word.
+- `averageCoresUsed` and `machineShare` on every profile. "0.06 cores avg"
+  answers "is this CPU-hungry" more directly than any percentage.
+- Peak CPU now names its denominator — "29% of one core" — which was the
+  omission that made the original figure read as heavy.
+
+### Fixed
+
+- Threshold tuning: a core pinned solid for two seconds on a 10-core Mac
+  initially reported as *Light*, because one core of ten is 9.9% and the light
+  ceiling was a flat 10%. The boundary now sits near "occupies one whole core".
+  Found by running a real CPU-bound workload through the scale.
+- Percentages below 10% keep a decimal place; rounding 0.6% to "1%" nearly
+  doubled it, and machine share for a light tool lives entirely in that range.
+
 ## [1.0.2] — 2026-08-27
 
 ### Added

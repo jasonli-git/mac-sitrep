@@ -79,6 +79,8 @@ never a participant in the sampling path, so it can be absent entirely.
 | 41 | Available memory is total − used, replacing free + inactive | Same error in the same place: counting `inactive` as available treats anonymous dirty pages as free when obtaining them costs a swap. Deriving available from used keeps `sitrep` and `can-i-run` telling the same story, and means one definition governs both. |
 | 42 | Redefining a stored metric bumps the schema and clears the affected rows | The v1 → v2 change altered what `mem_used` means. No arithmetic recovers the missing pages after the fact, and a `history --since 7d` spanning the change would silently average two different quantities — the invisible wrongness this project exists to prevent. Samples are dropped; machine identity, events, and self-measurements survive, and an event records why the gap is there. History is disposable by design (#7), which is what makes this affordable. |
 | 43 | Profiles report exact CPU time from `wait4` rusage, with sampled peak CPU labelled by its window | A sampled peak is a property of the sampling rate as much as of the workload: `sitrep processes` consumes 0.035 s of CPU in bursts shorter than the 50 ms sampling window, so the window averages a near-full core down to 31%. Published as an unqualified "Peak CPU 31%" that reads as a heavy tool, which it is not. `wait4` returns the child's rusage on exit — exact, sampling-independent — so CPU *time* leads the published table and peak follows with "(per 50 ms window)" attached. Sampling could never produce the exact figure; nothing is lost by taking it from the kernel. |
+| 44 | A plain-language CPU label is derived from **machine share**, never from peak CPU, and never appears without its number | "Peak CPU 31%" is opaque, and the fix is a word — but the word cannot hang off peak. Peak is a share of *one core*, a denominator most readers will not supply, and it is averaged down by the sampling window, so identical software sampled faster would earn a heavier label. `cpuSeconds ÷ wallClock ÷ coreCount` has neither problem: exact, and a fraction of a well-defined whole. Thresholds are published rather than hidden, and the label is always rendered beside the percentage and the core count — a word alone invites trust in a judgement whose scale the reader cannot see. Same software can score differently on different hardware; that is intended, since one core of four is a bigger imposition than one core of ten, and every profile records its machine. |
+| 45 | Threshold scales are validated against real workloads, not reasoned about | The first pass put the light/moderate boundary at a flat 10% of the machine, which looked defensible and reported a core pinned solid for two seconds on a 10-core Mac as *Light*. Running an actual CPU-bound workload through the scale is what surfaced it. The boundary now sits near "occupies one whole core" — 10% on a ten-core machine, 25% on a four-core one. Any future classifier (incident severity, cost bands) gets the same treatment before it ships. |
 
 ## Module Layout
 
@@ -154,7 +156,7 @@ Tests/
     ExportTests.swift               # rendering, injection, badge, compare, fit
 ```
 
-157 tests across twenty-eight suites.
+163 tests across twenty-eight suites.
 
 **Dependency rule.** `SitrepCore` imports only Darwin, Foundation, and IOKit —
 never `ArgumentParser`, never CLI concerns. Executable targets depend on

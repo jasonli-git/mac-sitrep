@@ -357,6 +357,12 @@ truth (ARCHITECTURE #7).
   window is averaged down; exact CPU time now comes from `wait4` rusage and
   leads the table (#43). Both were visible to anyone comparing against Activity
   Monitor or thinking about the number for a second. Neither had a failing test.
+- Note: adding the plain-language CPU label needed the *denominator* fixed
+  first. A word cannot hang off peak CPU — that is a share of one core, averaged
+  over the sampling window — so it derives from share of the whole machine
+  instead (ARCHITECTURE #44). And the first threshold pass called a fully pinned
+  core "Light"; only running a real CPU-bound workload through the scale caught
+  it (#45). Worth repeating for any future classifier.
 - Note: still no `sitrep watch`, and `pmset -g log` sleep/wake parsing remains
   unbuilt from Milestone 3. Both carried into post-v1.
 

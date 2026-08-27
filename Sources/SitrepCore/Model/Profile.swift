@@ -173,6 +173,70 @@ public struct Profile: Codable, Sendable, Equatable {
         public let sampleIntervalSeconds: Double
     }
 
+    /// Average cores occupied across the run: CPU time ÷ wall clock.
+    ///
+    /// Exact, because both inputs are. 1.0 means one core saturated for the
+    /// whole run; 4.0 means four. Unlike ``peakCPU`` this carries no
+    /// sampling-window error, which is what makes it safe to interpret.
+    public var averageCoresUsed: Double {
+        wallClockSeconds.median > 0 ? cpuSeconds.median / wallClockSeconds.median : 0
+    }
+
+    /// Share of the whole machine consumed over the run, 0...1.
+    ///
+    /// The denominator that makes a plain-language label defensible. A
+    /// percentage of *one core* cannot be labelled, because whether a third of a
+    /// core is a lot depends entirely on how many cores there are.
+    public var machineShare: Double {
+        machine.coreCount > 0 ? averageCoresUsed / Double(machine.coreCount) : 0
+    }
+
+    public var cpuLoad: CPULoad { CPULoad(machineShare: machineShare) }
+
+    /// A plain-language reading of CPU cost.
+    ///
+    /// Deliberately derived from ``machineShare`` rather than ``peakCPU``. Peak
+    /// is a percentage of one core — a denominator most readers will not supply
+    /// correctly — and is averaged down by the sampling window, so the same
+    /// workload sampled faster would earn a heavier label without behaving any
+    /// differently. Machine share has neither problem.
+    ///
+    /// The label never appears without the number beside it. A word alone
+    /// invites a reader to trust a judgement whose thresholds they cannot see.
+    public enum CPULoad: String, Codable, Sendable, CaseIterable {
+        case negligible
+        case light
+        case moderate
+        case heavy
+        case saturating
+
+        /// Thresholds as a share of the whole machine, stated so they can be
+        /// argued with rather than merely obeyed.
+        ///
+        /// The light/moderate boundary sits near "occupies one whole core" — on
+        /// a 10-core machine that is 10%, on a 4-core machine 25%. An earlier
+        /// pass put it at 10% flat, which reported a fully pinned core on a
+        /// 10-core Mac as *Light*. Testing the scale against a genuinely
+        /// CPU-bound workload is what caught it; the thresholds looked fine in
+        /// the abstract.
+        ///
+        /// Because the denominator is this machine, the same software can earn
+        /// different labels on different hardware. That is intended: one core of
+        /// four is a bigger imposition than one core of ten, and every profile
+        /// records the machine it was measured on.
+        public init(machineShare: Double) {
+            switch machineShare {
+            case ..<0.01: self = .negligible
+            case ..<0.08: self = .light
+            case ..<0.30: self = .moderate
+            case ..<0.65: self = .heavy
+            default: self = .saturating
+            }
+        }
+
+        public var label: String { rawValue.capitalized }
+    }
+
     public var allRunsSucceeded: Bool { runs.allSatisfy { $0.exitCode == 0 } }
 
     /// Runs too short to have been characterized. A profile with any of these

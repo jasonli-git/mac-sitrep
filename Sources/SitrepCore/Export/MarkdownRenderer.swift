@@ -36,12 +36,18 @@ public enum MarkdownRenderer {
             )
         }
 
-        lines.append("| CPU time | \(statistic(profile.cpuSeconds, seconds)) |")
-        // Labelled with the window because the figure depends on it: a burst
-        // shorter than the sampling interval is averaged down.
         lines.append(
-            "| Peak CPU <sub>(per \(Int(profile.overhead.sampleIntervalSeconds * 1000)) ms window)</sub> "
-                + "| \(statistic(profile.peakCPU, percent)) |"
+            "| **CPU load** | **\(profile.cpuLoad.label)** — "
+                + "\(percent(profile.machineShare)) of a "
+                + "\(profile.machine.coreCount)-core machine |"
+        )
+        lines.append("| CPU time | \(statistic(profile.cpuSeconds, seconds)) |")
+        // Peak names its denominator *and* its window: it is a share of one
+        // core, averaged over the sampling interval, and both facts change how
+        // it should be read.
+        lines.append(
+            "| Peak CPU | \(statistic(profile.peakCPU, percent)) of one core "
+                + "<sub>(per \(Int(profile.overhead.sampleIntervalSeconds * 1000)) ms window)</sub> |"
         )
         lines.append("| Wall clock | \(statistic(profile.wallClockSeconds, seconds)) |")
         if profile.diskReadBytes.max > 0 {
@@ -123,7 +129,11 @@ public enum MarkdownRenderer {
     }
 
     static func percent(_ fraction: Double) -> String {
-        String(format: "%.0f%%", fraction * 100)
+        // A decimal below 10%: rounding 0.6% to "1%" nearly doubles it, and the
+        // machine-share figure lives mostly down there.
+        fraction < 0.10
+            ? String(format: "%.1f%%", fraction * 100)
+            : String(format: "%.0f%%", fraction * 100)
     }
 
     static func seconds(_ value: Double) -> String {
