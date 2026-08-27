@@ -27,7 +27,7 @@ daemon.
 
 Future shapes stay cheap because measurement is isolated behind samplers and
 persistence behind a storage layer: a local HTTP API and web dashboard
-(Milestone 6+) become a third executable target over the same `SitrepCore`, and
+(Milestone 11) become a third executable target over the same `SitrepCore`, and
 an alternative store would replace the storage layer without touching samplers.
 The AI explanation layer is deliberately a consumer of finished incident reports,
 never a participant in the sampling path, so it can be absent entirely.
@@ -158,7 +158,7 @@ Tests/
     ExportTests.swift               # rendering, injection, badge, compare, fit
 ```
 
-164 tests across twenty-eight suites.
+164 tests across twenty-six suites.
 
 **Dependency rule.** `SitrepCore` imports only Darwin, Foundation, and IOKit —
 never `ArgumentParser`, never CLI concerns. Executable targets depend on

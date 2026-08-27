@@ -3,6 +3,9 @@
 Working list for the current milestone. Longer-horizon items live in
 [ROADMAP.md](ROADMAP.md).
 
+No milestone is active — v1 shipped 2026-08-27. Next up is Milestone 6,
+Incidents (see [ROADMAP.md](ROADMAP.md)).
+
 ## Milestone 0 — Scaffolding ✅
 
 - [x] SwiftPM manifest targeting macOS 14, Swift 6 language mode
@@ -380,6 +383,10 @@ truth (ARCHITECTURE #7).
 - Full Xcode is not installed, so `swift test` depends on the vendored
   `swift-testing` package. No action needed unless you would rather install Xcode
   (~10 GB) and drop the dependency.
-- Verifying Milestone 4's external-service delta attribution will want a real
-  local-inference workload. Ollama is installed; confirm which model to profile
-  against when we get there.
+- ~~Verifying Milestone 4's external-service delta attribution will want a real
+  local-inference workload.~~ Resolved 2026-08-27: verified against `ollama run`
+  with a 4B model — 11 MB in the spawned group, 416 MB in the server.
+- Note: the Milestone 3 note "the LaunchAgent has not been installed on this
+  machine" is no longer current — the daemon has since been installed and runs
+  within budget (`sitrep daemon status`). The note stands as a record of the
+  state at milestone completion.

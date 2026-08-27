@@ -20,7 +20,7 @@ For what it should do and why, see [SPEC.md](SPEC.md). For how it is built, see
 
 ## Status
 
-**v1.0.0 — all five milestones complete.** Measure a workload, attribute what it
+**v1 complete — all five milestones shipped; currently 1.1.1.** Measure a workload, attribute what it
 really costs, publish it, and prove in CI that the published numbers still match.
 Incidents, policy enforcement, and remote access are specified in
 [SPEC.md](SPEC.md) and staged after v1 — see [ROADMAP.md](ROADMAP.md) for what
@@ -256,9 +256,10 @@ $ sitrep can-i-run
    4.1 GB available, needs 2.3 MB — fits with 4.1 GB to spare.
 ```
 
-Available means free plus inactive pages: what the kernel can hand over without
-swapping. This is a claim about *this* machine only — mac-sitrep does not predict
-across hardware.
+Available means total minus used: free memory plus the reclaimable file cache,
+excluding the anonymous dirty pages that would cost a swap to obtain. It is the
+same definition `sitrep` itself reports, so the two always agree. This is a
+claim about *this* machine only — mac-sitrep does not predict across hardware.
 
 ### Exit codes
 

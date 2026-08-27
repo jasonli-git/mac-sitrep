@@ -385,9 +385,11 @@ machine.
 ## Interfaces
 
 **CLI is the primary interface** and should feel like a developer utility:
-`sitrep`, `sitrep processes`, `sitrep incidents`, `sitrep run`, `sitrep sensors`,
+`sitrep`, `sitrep processes`, `sitrep incidents`, `sitrep run`,
 `sitrep doctor`, `sitrep status <project>`, `sitrep explain <project>`,
 `sitrep export`, `sitrep compare`, `sitrep can-i-run`, and `--json` everywhere.
+What each sensor can and cannot report is `sitrep doctor`'s job — there is no
+separate `sensors` command.
 
 The status display updates in place rather than printing a new line every few
 seconds.
