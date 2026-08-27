@@ -38,6 +38,14 @@ requirements block works end to end.
 
 ### Fixed
 
+- `sitrep run --help` printed nothing useful and tried to launch a program named
+  `--help`; passthrough parsing now captures only what follows `--`.
+- `--version` on `run` and `export` shadowed the built-in version flag, so
+  `sitrep export --version` printed a requirements block instead of a version
+  number. The label option is now `--label`.
+- Injecting into a document that *documents* the marker syntax was refused, since
+  a substring scan counted the prose mention as a real marker. Markers now count
+  only when alone on a line.
 - Recommended-RAM rounding scales with magnitude. Rounding everything up to whole
   gigabytes reported "1.0 GB recommended" for a tool measured at 2.2 MB — true,
   useless, and corrosive to every number printed beside it.

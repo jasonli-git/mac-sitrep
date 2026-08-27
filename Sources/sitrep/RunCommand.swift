@@ -31,8 +31,11 @@ struct Run: ParsableCommand {
     @Option(name: .long, help: "Number of runs. More runs, tighter median.")
     var runs: Int?
 
-    @Option(name: .long, help: "Version label. Defaults to the git description.")
-    var version: String?
+    // Named --label, not --version: the latter collides with ArgumentParser's
+    // built-in --version flag, so the same word meant two different things
+    // depending on where it appeared.
+    @Option(name: .long, help: "Version label for the artifact. Defaults to the git description.")
+    var label: String?
 
     @Flag(name: .long, help: "Emit the profile as JSON instead of writing it.")
     var json = false
@@ -43,7 +46,10 @@ struct Run: ParsableCommand {
     @Option(name: .long, help: "Seconds before a run is killed. Guards against a hanging workload.")
     var timeout: Double = ProfileRun.defaultTimeout
 
-    @Argument(parsing: .captureForPassthrough, help: "Command to run, after --.")
+    // `.postTerminator`, not `.captureForPassthrough`: the latter swallows
+    // `--help` and every other flag, so `sitrep run --help` tried to launch a
+    // program called "--help". Only arguments after `--` are the workload.
+    @Argument(parsing: .postTerminator, help: "Command to run, after --.")
     var command: [String] = []
 
     func validate() throws {
@@ -68,11 +74,11 @@ struct Run: ParsableCommand {
             )
         }
 
-        let label = version ?? Self.gitDescription(in: directory)
+        let versionLabel = label ?? Self.gitDescription(in: directory)
 
         // Progress goes to stderr so --json stays pipeable.
         let profile = try ProfileRun.profile(
-            config: config, scenario: target, version: label, runs: runs,
+            config: config, scenario: target, version: versionLabel, runs: runs,
             timeout: timeout,
             report: { message in
                 FileHandle.standardError.write(Data((message + "\n").utf8))

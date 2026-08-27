@@ -340,6 +340,15 @@ truth (ARCHITECTURE #7).
 - Note: `--check` proves the README matches the artifact, not that the artifact
   is current. Nothing detects "code changed, nobody re-profiled". Belongs to
   whoever wires `sitrep run` into a release process.
+- Note: three CLI bugs surfaced only when writing the README usage guide, not
+  when building the commands. `sitrep run --help` tried to *launch* a program
+  called `--help`, because `.captureForPassthrough` swallows every flag — now
+  `.postTerminator`, so only what follows `--` is the workload. `--version`
+  meant "version label" on `run`/`export` and shadowed ArgumentParser's built-in
+  flag — renamed to `--label`. And injecting into a README that *documents* the
+  marker syntax was refused, because a substring scan counted the prose mention
+  as a second marker; markers now count only when alone on a line
+  (ARCHITECTURE #39). Writing the docs was a better test pass than the tests.
 - Note: still no `sitrep watch`, and `pmset -g log` sleep/wake parsing remains
   unbuilt from Milestone 3. Both carried into post-v1.
 

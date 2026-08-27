@@ -74,6 +74,7 @@ never a participant in the sampling path, so it can be absent entirely.
 | 36 | `compare` uses medians, and calls newly-introduced swap out separately | Comparing peaks would let one unlucky run read as a regression, which is the reason profiles carry a distribution at all. Swap is handled apart from the percentage comparisons because a ratio against a zero baseline is meaningless — going from no swapping to any swapping is categorical. The 10% significance floor sits above the spread a stable measurement shows. |
 | 37 | `can-i-run` defines available memory as free + inactive | Inactive pages are reclaimable on demand, and macOS deliberately keeps very little memory actually free — using `free` alone would report that nothing fits on a perfectly healthy machine. Deliberately a claim about *this* machine only; predicting fit on unseen hardware is a permanent non-goal. |
 | 38 | Recommended-RAM rounding granularity scales with magnitude | Rounding everything up to whole gigabytes reported "1.0 GB recommended" for a tool whose measured peak was 2.2 MB — technically true, useless in practice, and corrosive to the credibility of every other number printed beside it. Steps are 8 MB below 64 MB, 64 MB below 1 GB, and 1 GB above. |
+| 39 | Injection markers are recognized only when alone on a line | Found by this project's own README: the Usage section explains the marker syntax in a sentence, and a substring scan counted that as a second start marker and refused to inject. Any project documenting how injection works would hit the same wall. Our writer always emits markers on their own line, so requiring it costs nothing. Indented markers still count; markers inside prose do not. |
 
 ## Module Layout
 
@@ -149,7 +150,7 @@ Tests/
     ExportTests.swift               # rendering, injection, badge, compare, fit
 ```
 
-152 tests across twenty-eight suites.
+154 tests across twenty-eight suites.
 
 **Dependency rule.** `SitrepCore` imports only Darwin, Foundation, and IOKit —
 never `ArgumentParser`, never CLI concerns. Executable targets depend on

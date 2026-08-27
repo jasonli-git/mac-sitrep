@@ -31,8 +31,9 @@ struct Export: ParsableCommand {
     @Option(name: .long, help: "Scenario to publish. Defaults to the most recent.")
     var scenario: String?
 
+    // See RunCommand: --version would shadow the built-in flag.
     @Option(name: .long, help: "Version label to publish. Defaults to the most recent.")
-    var version: String?
+    var label: String?
 
     @Option(name: .long, help: "File to inject the block into.")
     var inject: String?
@@ -51,7 +52,7 @@ struct Export: ParsableCommand {
 
     func run() throws {
         let profile = try Self.resolveProfile(
-            directory: directory, project: project, scenario: scenario, version: version
+            directory: directory, project: project, scenario: scenario, version: label
         )
         let block = MarkdownRenderer.requirementsBlock(profile)
 

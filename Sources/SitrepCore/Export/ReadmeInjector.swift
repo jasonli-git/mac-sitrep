@@ -60,40 +60,48 @@ public enum ReadmeInjector {
     public static func apply(
         block: String, to document: String
     ) throws -> (document: String, outcome: Outcome) {
-        let starts = occurrences(of: startMarker, in: document)
-        let ends = occurrences(of: endMarker, in: document)
+        var lines = document.components(separatedBy: "\n")
+        let starts = markerLines(startMarker, in: lines)
+        let ends = markerLines(endMarker, in: lines)
 
-        guard starts == ends, starts <= 1 else {
-            throw InjectionError.unbalancedMarkers(starts: starts, ends: ends)
+        guard starts.count == ends.count, starts.count <= 1 else {
+            throw InjectionError.unbalancedMarkers(starts: starts.count, ends: ends.count)
         }
 
-        let wrapped = """
-        \(startMarker)
-        \(generatedNotice)
+        let wrapped = [startMarker, generatedNotice, ""]
+            + block.components(separatedBy: "\n")
+            + ["", endMarker]
 
-        \(block)
-
-        \(endMarker)
-        """
-
-        guard starts == 1 else {
+        guard let first = starts.first else {
             // No markers: append rather than guessing where the section belongs.
             // Inserting at a heuristic position would reorder someone's document.
-            let separator = document.hasSuffix("\n") ? "\n" : "\n\n"
-            return (document + separator + wrapped + "\n", .appended)
+            let separator = document.hasSuffix("\n") ? "" : "\n"
+            return (
+                document + separator + "\n" + wrapped.joined(separator: "\n") + "\n",
+                .appended
+            )
         }
 
-        guard let startRange = document.range(of: startMarker),
-              let endRange = document.range(of: endMarker),
-              startRange.lowerBound < endRange.lowerBound
-        else {
+        guard let last = ends.first, first < last else {
             throw InjectionError.endBeforeStart
         }
 
-        let updated = document.replacingCharacters(
-            in: startRange.lowerBound..<endRange.upperBound, with: wrapped
-        )
+        lines.replaceSubrange(first...last, with: wrapped)
+        let updated = lines.joined(separator: "\n")
         return (updated, updated == document ? .unchanged : .replaced)
+    }
+
+    /// Line indices where `marker` is the entire line.
+    ///
+    /// Markers are only recognized alone on a line, never mid-sentence. A
+    /// document that *documents* the marker syntax — as this project's own
+    /// README does — would otherwise be read as having extra markers and
+    /// refused. Our writer always emits them on their own line, so nothing is
+    /// lost by requiring it.
+    static func markerLines(_ marker: String, in lines: [String]) -> [Int] {
+        lines.indices.filter {
+            lines[$0].trimmingCharacters(in: .whitespaces) == marker
+        }
     }
 
     /// Writes the block into the file at `path`.
@@ -121,13 +129,14 @@ public enum ReadmeInjector {
 
     /// Extracts the current block, or `nil` when the file has no markers.
     public static func currentBlock(at path: String) throws -> String? {
-        let document = try read(path)
-        guard let start = document.range(of: startMarker),
-              let end = document.range(of: endMarker),
-              start.upperBound < end.lowerBound
+        let lines = try read(path).components(separatedBy: "\n")
+        guard let start = markerLines(startMarker, in: lines).first,
+              let end = markerLines(endMarker, in: lines).first,
+              start < end
         else { return nil }
 
-        return String(document[start.upperBound..<end.lowerBound])
+        return lines[(start + 1)..<end]
+            .joined(separator: "\n")
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
@@ -136,17 +145,6 @@ public enum ReadmeInjector {
             throw InjectionError.fileNotFound(path)
         }
         return try String(contentsOfFile: path, encoding: .utf8)
-    }
-
-    static func occurrences(of needle: String, in haystack: String) -> Int {
-        var count = 0
-        var searchRange = haystack.startIndex..<haystack.endIndex
-
-        while let found = haystack.range(of: needle, range: searchRange) {
-            count += 1
-            searchRange = found.upperBound..<haystack.endIndex
-        }
-        return count
     }
 }
 

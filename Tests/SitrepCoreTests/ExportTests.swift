@@ -259,6 +259,37 @@ struct ReadmeInjectorTests {
         #expect(try !ReadmeInjector.isUpToDate(block: block, at: path))
     }
 
+    @Test("A document that documents the markers is not confused by them")
+    func markersMentionedInProseAreIgnored() throws {
+        // Caught by this project's own README: the Usage section explains the
+        // marker syntax in a sentence, and a naive substring count read that as
+        // a second start marker and refused to inject. Markers only count when
+        // they are alone on a line.
+        let document = """
+        # Project
+
+        Injection replaces the region between \(ReadmeInjector.startMarker) and
+        its matching end marker, leaving the rest alone.
+
+        \(ReadmeInjector.startMarker)
+        old
+        \(ReadmeInjector.endMarker)
+        """
+
+        let (result, outcome) = try ReadmeInjector.apply(block: "new", to: document)
+        #expect(outcome == .replaced)
+        #expect(result.contains("new"))
+        #expect(result.contains("its matching end marker"), "prose must survive")
+    }
+
+    @Test("An indented marker still counts")
+    func indentedMarkerCounts() throws {
+        let document = "# T\n\n  \(ReadmeInjector.startMarker)\n  old\n  \(ReadmeInjector.endMarker)"
+        let (_, outcome) = try ReadmeInjector.apply(block: "new", to: document)
+
+        #expect(outcome == .replaced)
+    }
+
     @Test("A missing file reports its path")
     func missingFileReportsPath() {
         #expect(throws: ReadmeInjector.InjectionError.self) {
