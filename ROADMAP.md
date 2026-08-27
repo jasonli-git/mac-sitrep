@@ -1,6 +1,6 @@
 # mac-sitrep — Roadmap
 
-Milestone 4 is complete as of 2026-08-26. A milestone is done when its capability
+**v1 is complete as of 2026-08-27.** All five milestones shipped. A milestone is done when its capability
 works end to end, `swift build` and `swift test` both pass, the six project
 documents reflect what actually exists, and the user has reviewed it.
 
@@ -19,7 +19,7 @@ baselines rather than guesses.
 | 2 | ✅ done | **Live snapshot** — `sitrep` status with health state and reasons, `sitrep processes` sorted by memory or CPU; reading/sample split deriving per-second rates from cumulative counters; unreadable-process count disclosed; `--json` and `--interval` on both; 61 tests |
 | 3 | ✅ done | **History and self-observability** — `sitrepd` LaunchAgent with background QoS, SQLite store with 48 h/30 d/1 y retention tiers, health-keyed 10 s/1 s cadence, hysteresis, daemon self-measurement including sustained CPU; `sitrep history` and `sitrep daemon install\|uninstall\|status`; 95 tests |
 | 4 | ✅ done | **Workload profiling** — `sitrep run` and `sitrep init`: process-group attribution, external-service delta measured against a pre-run baseline and followed until stable, N runs to median/range, per-run timeout, under-observation and contention flags, JSON artifact; 120 tests |
-| 5 | ⬜ planned | **Publishing** — `sitrep export --inject` with marker-scoped README replacement and a `--check` drift gate, shields.io badge JSON, `sitrep compare`, `sitrep can-i-run` |
+| 5 | ✅ done | **Publishing** — `sitrep export` with marker-scoped README injection and a `--check` drift gate that needs no Mac in CI, shields.io badge JSON, `sitrep compare` for regressions, `sitrep can-i-run` for fit prediction; mac-sitrep publishes its own measured requirements; 152 tests |
 
 ## Post-v1 (not scheduled)
 

@@ -2,10 +2,9 @@
 
 How the system is built and why. [SPEC.md](SPEC.md) is the source of truth for
 *what* it does; this document covers structure, technical decisions, and their
-rationale. Sections are marked **built** or **designed** — designed sections
-record decisions already made for subsystems that do not exist yet, so the
-reasoning survives even though the code has not landed. Milestone status lives in
-[ROADMAP.md](ROADMAP.md).
+rationale. Every section describes code that exists as of v1.0.0; decisions
+recorded for subsystems not yet built are marked as such in the log. Milestone
+status lives in [ROADMAP.md](ROADMAP.md).
 
 ## System Shape
 
@@ -69,10 +68,16 @@ never a participant in the sampling path, so it can be absent entirely.
 | 30 | External services are followed until their footprint **stops growing**, not for a fixed window | An inference server keeps loading after the client that asked it returns: `ollama run` against a cold model captured 349 MB while the server settled far higher. A fixed post-run window has no principled length, since load time depends on the model. Watching until growth stops supports a claim the tool can defend — *we watched until it stopped growing* — with a 30 s cap that is recorded when hit. |
 | 31 | Every run is bounded by a timeout that kills the process **group** | A profiler that can hang forever is a bad profiler. Not hypothetical: `ollama run` inherits stdin, and with stdin on a pipe that never closed it slept for seventeen minutes instead of answering. Killing the group rather than the pid is why the group exists — signalling the leader alone would orphan its children. Timed-out runs are recorded as such, since they measured a hang rather than the work. |
 | 32 | During a run, full process-table scans happen every 5th sample; targeted reads in between | The full scan costs ~4 syscalls across ~800 processes. At 50 ms that was ~13% CPU — enough for the profiler to distort the CPU-bound workloads it exists to measure. Known group members are re-read directly between scans, which cut overhead 57% (0.861 s → 0.373 s CPU on the same workload) with identical results. Contention is only accumulated from full scans, since a targeted read sees nothing outside the workload. |
+| 33 | The rendered block reads **only** the artifact, never the clock or the machine | Re-rendering the same artifact must be byte-identical, or `--check` reports drift on every run and the CI gate is worthless. So the block carries the profile's `generatedAt`, not the render time, and its date is day-precision — time of day would add churn for information no reader can use. This is the practical payoff of #7's artifact-as-source-of-truth. A test asserts the block does not contain today's date. |
+| 34 | `--check` and `--inject` share one implementation | A drift gate that compared against a second, subtly different renderer would report drift that does not exist, and a repo would never go green. `ReadmeInjector.apply` produces the document that *would* be written; `--inject` saves it, `--check` compares it. |
+| 35 | Injection refuses unbalanced, duplicated, or reversed markers rather than repairing them | The file is hand-written and the block is a guest in it. Any automatic repair of markers we cannot interpret risks eating someone's prose, and the failure is cheap to fix by hand. Missing markers are the one safe case: a section is appended rather than inserted at a guessed position, since inserting would reorder the document. |
+| 36 | `compare` uses medians, and calls newly-introduced swap out separately | Comparing peaks would let one unlucky run read as a regression, which is the reason profiles carry a distribution at all. Swap is handled apart from the percentage comparisons because a ratio against a zero baseline is meaningless — going from no swapping to any swapping is categorical. The 10% significance floor sits above the spread a stable measurement shows. |
+| 37 | `can-i-run` defines available memory as free + inactive | Inactive pages are reclaimable on demand, and macOS deliberately keeps very little memory actually free — using `free` alone would report that nothing fits on a perfectly healthy machine. Deliberately a claim about *this* machine only; predicting fit on unseen hardware is a permanent non-goal. |
+| 38 | Recommended-RAM rounding granularity scales with magnitude | Rounding everything up to whole gigabytes reported "1.0 GB recommended" for a tool whose measured peak was 2.2 MB — technically true, useless in practice, and corrosive to the credibility of every other number printed beside it. Steps are 8 MB below 64 MB, 64 MB below 1 GB, and 1 GB above. |
 
 ## Module Layout
 
-**Built** (Milestones 0–4):
+**Built** (Milestones 0–5):
 
 ```
 Package.swift                       # SwiftPM manifest; dependency policy comments
@@ -95,6 +100,10 @@ Sources/
       Schema.swift                  # DDL and versioned migration
       SampleStore.swift             # writes and history queries
       Rollup.swift                  # aggregation and retention
+    Export/
+      MarkdownRenderer.swift        # requirements block from an artifact
+      ReadmeInjector.swift          # marker-scoped replacement + BadgeRenderer
+      ProfileComparison.swift       # regression diff, fit prediction, discovery
     Profiling/
       Attribution.swift             # pgid group + external-service delta
       ProfileRun.swift              # settle, spawn, sample, aggregate
@@ -126,6 +135,7 @@ Sources/
     HistoryCommand.swift            # `sitrep history` window summary
     DaemonCommand.swift             # `sitrep daemon` install/uninstall/status
     RunCommand.swift                # `sitrep run` and `sitrep init`
+    ExportCommand.swift             # `sitrep export`, `compare`, `can-i-run`
   sitrepd/
     main.swift                      # run loop, signals, rollup schedule
 Tests/
@@ -136,24 +146,19 @@ Tests/
     StorageTests.swift              # database, store, rollup
     DaemonTests.swift               # hysteresis, collector, launch agent
     ProfilingTests.swift            # statistic, config, spawn, attribution, artifact
+    ExportTests.swift               # rendering, injection, badge, compare, fit
 ```
 
-120 tests across twenty-one suites.
+152 tests across twenty-eight suites.
 
 **Dependency rule.** `SitrepCore` imports only Darwin, Foundation, and IOKit —
 never `ArgumentParser`, never CLI concerns. Executable targets depend on
 `SitrepCore`; `SitrepCore` depends on neither. This is what allows the daemon and
 a future HTTP server to be added as peers rather than as forks of the CLI.
 
-**Designed**, arriving with the milestones named in [ROADMAP.md](ROADMAP.md):
-
-```
-SitrepCore/
-  Export/                           # M5
-    MarkdownRenderer.swift
-    ReadmeInjector.swift            #   marker-scoped replacement
-    BadgeRenderer.swift             #   shields.io endpoint JSON
-```
+All of v1 is built. The post-v1 subsystems named in [ROADMAP.md](ROADMAP.md) —
+incidents, the policy engine, the HTTP API and dashboard, the AI explanation
+layer, and cost accounting — have no modules yet.
 
 ## Measurement sources — built
 
@@ -365,6 +370,43 @@ decision: exit is detected with `waitpid(WNOHANG)` rather than a liveness check
 that kills the group (#31), and services are followed until they stop growing
 rather than for a fixed window (#30).
 
+## Publishing — built
+
+```
+.sitrep/profiles/<project>/<version>-<scenario>.json   (committed)
+                    │
+                    ▼
+          MarkdownRenderer  ──▶ requirements block
+                    │
+        ┌───────────┴───────────┐
+        ▼                       ▼
+  ReadmeInjector          BadgeRenderer
+   --inject → write        shields.io endpoint JSON
+   --check  → compare, exit non-zero on drift
+```
+
+Rendering reads the artifact and nothing else — not the clock, not the machine
+(#33). That is what makes `--check` a usable CI gate: the same artifact always
+produces the same bytes, so a difference means the README genuinely drifted
+rather than that time passed.
+
+Because the artifact is committed and the renderer is pure, **CI never needs a
+Mac**. Profile locally, commit the JSON, and let CI re-render and compare.
+
+`--check` and `--inject` run the same code path (#34); the gate answers "would
+injecting change anything?" rather than reimplementing the comparison.
+
+The block carries its own caveats — contention, instability across runs, thermal
+throttling, timed-out or under-observed runs, and the capability gaps from
+`doctor`. A requirements table with no caveats would imply a confidence the
+measurement does not always have.
+
+`compare` reads two artifacts and reports median deltas beyond a 10% floor,
+warning when the two are not really comparable — different machines, scenarios,
+or commands (#36). `can-i-run` inverts the published figure against memory
+available right now (#37), which is what makes a number in a README actionable
+rather than decorative.
+
 ## Known limitations
 
 - **Tests require the vendored `swift-testing` package** on a machine without
@@ -433,6 +475,18 @@ rather than for a fixed window (#30).
   A declared service of `ollama` also matches anything else with that substring.
   Adequate for the real cases and cheap to reason about; a project needing
   finer matching would want a bundle id or listening port instead.
+- **Disk-read comparisons are page-cache sensitive.** A second run of the same
+  workload often reads nothing, which `compare` reports as a large improvement.
+  It never produces a false *regression*, so it is left in as informative rather
+  than excluded, but it is a poor regression signal on its own.
+- **`sitrep export` publishes one scenario per marker block.** A project with
+  several meaningfully different workloads can only publish one of them into a
+  given file. Multiple blocks would need distinct marker names, which is not
+  built.
+- **`--check` proves the README matches the artifact, not that the artifact is
+  current.** Nothing detects that the code changed and nobody re-profiled. That
+  gap is real and belongs to whoever wires `sitrep run` into their release
+  process.
 - **`doctor` performs real I/O.** Probing is what makes the report trustworthy
   (#13), but it means the command reads sysctls, walks the IOKit registry,
   enumerates ~800 processes, and spawns `pmset`. It is cheap — roughly 30 ms and

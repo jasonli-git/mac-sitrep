@@ -16,6 +16,7 @@ struct SitrepCommand: ParsableCommand {
         subcommands: [
             Status.self, Processes.self, History.self,
             Run.self, Init.self,
+            Export.self, Compare.self, CanIRun.self,
             Daemon.self, Doctor.self, Version.self,
         ],
         defaultSubcommand: Status.self

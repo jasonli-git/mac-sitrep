@@ -168,16 +168,30 @@ public struct Profile: Codable, Sendable, Equatable {
 
     public var isTrustworthy: Bool { runs.allSatisfy(\.isUsable) }
 
-    /// Recommended RAM: measured peak plus headroom, rounded up to the next GB.
+    /// Recommended RAM: measured peak plus 25% headroom, rounded to a unit that
+    /// suits the magnitude.
     ///
     /// Headroom exists because a machine sized exactly at the peak will swap the
-    /// moment anything else runs — and the whole point of publishing this is to
+    /// moment anything else runs, and the point of publishing the figure is to
     /// let someone decide whether a workload fits.
+    ///
+    /// The rounding granularity scales deliberately. Rounding everything up to
+    /// whole gigabytes reported "1.0 GB recommended" for a tool whose measured
+    /// peak was 2.2 MB — technically true, useless in practice, and corrosive to
+    /// the credibility of every other number beside it.
     public var recommendedRAMBytes: UInt64 {
-        let peak = UInt64(peakRAMBytes.max)
-        let withHeadroom = Double(peak) * 1.25
-        let gigabyte = Double(1 << 30)
-        return UInt64((withHeadroom / gigabyte).rounded(.up)) * (1 << 30)
+        let withHeadroom = Double(peakRAMBytes.max) * 1.25
+
+        let granularity: Double
+        if withHeadroom < Double(64 << 20) {
+            granularity = Double(8 << 20)        // under 64 MB → 8 MB steps
+        } else if withHeadroom < Double(1 << 30) {
+            granularity = Double(64 << 20)       // under 1 GB  → 64 MB steps
+        } else {
+            granularity = Double(1 << 30)        // 1 GB and up → 1 GB steps
+        }
+
+        return UInt64((withHeadroom / granularity).rounded(.up) * granularity)
     }
 
     // MARK: - Files

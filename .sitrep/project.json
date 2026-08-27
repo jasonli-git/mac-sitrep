@@ -1,0 +1,10 @@
+{
+  "project" : "mac-sitrep",
+  "scenarios" : [
+    {
+      "name" : "processes",
+      "command" : ["sitrep", "processes", "--limit", "10"],
+      "runs" : 5
+    }
+  ]
+}

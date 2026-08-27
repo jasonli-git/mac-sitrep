@@ -362,7 +362,7 @@ struct ProfileArtifactTests {
         #expect(path.contains(".sitrep/profiles/demo/"))
     }
 
-    @Test("Recommended RAM adds headroom and rounds to whole GB")
+    @Test("Recommended RAM adds headroom and rounds to whole GB at GB scale")
     func recommendedRAMAddsHeadroom() {
         // A machine sized exactly at the peak swaps the moment anything else
         // runs, which defeats the point of publishing the figure.
@@ -371,6 +371,20 @@ struct ProfileArtifactTests {
         #expect(profile.recommendedRAMBytes > 9 << 30)
         #expect(profile.recommendedRAMBytes.isMultiple(of: 1 << 30))
         #expect(profile.recommendedRAMBytes == 12 << 30)  // 9 GB × 1.25 → 11.25 → 12
+    }
+
+    @Test("Recommended RAM scales its granularity to small workloads")
+    func recommendedRAMScalesGranularity() {
+        // Rounding everything to whole gigabytes reported "1.0 GB recommended"
+        // for a tool measured at 2.2 MB — true, useless, and corrosive to every
+        // number printed beside it.
+        let tiny = makeProfile(runs: [makeRun(peak: 2_300_000)])
+        #expect(tiny.recommendedRAMBytes < 16 << 20, "a 2 MB workload must not recommend 1 GB")
+        #expect(tiny.recommendedRAMBytes >= 2_300_000)
+
+        let medium = makeProfile(runs: [makeRun(peak: 400 << 20)])
+        #expect(medium.recommendedRAMBytes.isMultiple(of: 64 << 20))
+        #expect(medium.recommendedRAMBytes >= 500 << 20)
     }
 
     @Test("A timed-out run is not treated as under-sampled")

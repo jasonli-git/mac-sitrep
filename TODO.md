@@ -305,18 +305,43 @@ Tests:
   Only surfaced when reinstalling over a running daemon.
 - Note: no `sitrep watch` yet. Still a good small follow-up.
 
-## Milestone 5 — Publishing ⬜
+## Milestone 5 — Publishing ✅
 
-- [ ] `Export/MarkdownRenderer.swift` — requirements block from a profile
-- [ ] `Export/ReadmeInjector.swift` — marker-scoped replacement, refusing
+Deliverable: a measured requirements block lands in a README, CI can prove it has
+not drifted, and two artifacts can be compared.
+
+The constraint that shapes it: **the rendered block must be byte-identical when
+re-rendered from the same artifact**, or `--check` fails on every run and the
+gate is worthless. So the block carries the *profile's* timestamp, never the
+render time — which is the practical payoff of the artifact being the source of
+truth (ARCHITECTURE #7).
+
+- [x] `Export/MarkdownRenderer.swift` — requirements block from a profile
+- [x] `Export/ReadmeInjector.swift` — marker-scoped replacement, refusing
       malformed or duplicated markers; append when markers are absent
-- [ ] `sitrep export --inject README.md` and `--check` drift gate
-- [ ] `Export/BadgeRenderer.swift` — shields.io endpoint JSON
-- [ ] `sitrep compare <project> <a> <b>` — regression diff between artifacts
-- [ ] `sitrep can-i-run <project>` — fit prediction against current free memory
-- [ ] mac-sitrep publishes its own measured requirements into its own README
-- [ ] Tests: injection is idempotent, `--check` detects drift, malformed markers
+- [x] `sitrep export --inject README.md` and `--check` drift gate
+- [x] `Export/BadgeRenderer.swift` — shields.io endpoint JSON
+- [x] `sitrep compare <project> <a> <b>` — regression diff between artifacts
+- [x] `sitrep can-i-run <project>` — fit prediction against current free memory
+- [x] mac-sitrep publishes its own measured requirements into its own README
+- [x] Tests: injection is idempotent, `--check` detects drift, malformed markers
       are refused, comparison detects a regression
+
+- Note: recommended RAM rounded everything to whole gigabytes, so mac-sitrep's
+  own 2.2 MB measurement published as "1.0 GB recommended". Caught only by
+  dogfooding — profiling the tool on itself. Granularity now scales with
+  magnitude (ARCHITECTURE #38).
+- Note: the first self-profile embedded `/Users/jasonli/.local/bin/sitrep` in the
+  published block, leaking a home path into a file meant to be committed. The
+  scenario now names the bare command and lets PATH resolve it.
+- Note: disk-read comparison is page-cache sensitive — a warm second run reads
+  nothing and reports a large "improvement". Never a false regression, so left in
+  as informative. Recorded in ARCHITECTURE limitations.
+- Note: `--check` proves the README matches the artifact, not that the artifact
+  is current. Nothing detects "code changed, nobody re-profiled". Belongs to
+  whoever wires `sitrep run` into a release process.
+- Note: still no `sitrep watch`, and `pmset -g log` sleep/wake parsing remains
+  unbuilt from Milestone 3. Both carried into post-v1.
 
 ## Parked / needs user input
 
