@@ -3,6 +3,24 @@
 All notable changes to mac-sitrep. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.1.1] — 2026-08-27
+
+### Fixed
+
+- **`sitrep daemon install` failed whenever `sitrep` was invoked through `PATH`.**
+  It located `sitrepd` from `argv[0]`, which for a PATH invocation is the bare
+  word `sitrep` and resolves against the current directory — so it hunted for the
+  daemon inside whatever project the user was standing in. It worked only when
+  invoked by absolute path, which is how it had always been tested. Now uses
+  `_NSGetExecutablePath`, and the error message names the exact `install`
+  command to fix a genuine mismatch.
+
+### Added
+
+- `sitrep daemon status` reports the running daemon's version and warns when it
+  differs from the CLI. Replacing the binary on disk does not restart a running
+  daemon, so the two can drift apart with nothing to say so.
+
 ## [1.1.0] — 2026-08-27
 
 ### Added

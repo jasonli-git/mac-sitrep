@@ -363,6 +363,15 @@ truth (ARCHITECTURE #7).
   instead (ARCHITECTURE #44). And the first threshold pass called a fully pinned
   core "Light"; only running a real CPU-bound workload through the scale caught
   it (#45). Worth repeating for any future classifier.
+- Note: `daemon install` was broken for the normal invocation and nobody noticed
+  because every test and every manual run used an absolute path. `argv[0]` is
+  what the caller typed, not where the binary is (ARCHITECTURE #46). Worth
+  remembering: testing a CLI the way you build it is not testing it the way it
+  gets used.
+- Note: `daemon status` can briefly report stale version skew right after an
+  install, before the new daemon writes its start event. Window is a second or
+  two, self-correcting, and the suggested remedy is idempotent. Not worth
+  engineering around.
 - Note: still no `sitrep watch`, and `pmset -g log` sleep/wake parsing remains
   unbuilt from Milestone 3. Both carried into post-v1.
 

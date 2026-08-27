@@ -242,6 +242,20 @@ struct LaunchAgentTests {
         }
     }
 
+    @Test("The running executable resolves to an absolute path")
+    func runningExecutablePathIsAbsolute() {
+        // Regression guard. Locating sitrepd used argv[0], which is whatever the
+        // caller typed: invoked through PATH it is the bare word "sitrep",
+        // resolved against the current directory. `sitrep daemon install` then
+        // hunted for the daemon inside whatever project the user was standing
+        // in, and only worked when invoked by absolute path.
+        let path = DaemonPaths.runningExecutablePath()
+
+        #expect(path != nil)
+        #expect(path?.hasPrefix("/") == true, "must not be relative to the working directory")
+        #expect(FileManager.default.fileExists(atPath: path ?? ""))
+    }
+
     @Test("Paths live under the user's Application Support")
     func pathsAreUserScoped() {
         // Running unprivileged means there is nowhere else we could write.

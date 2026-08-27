@@ -43,22 +43,43 @@ extension Daemon {
 
         /// Locates `sitrepd` next to the running `sitrep` binary.
         ///
-        /// Resolves symlinks because a Homebrew-style symlinked `sitrep` would
-        /// otherwise produce a plist pointing at a directory with no daemon in it.
+        /// Uses `_NSGetExecutablePath` rather than `CommandLine.arguments[0]`.
+        /// argv[0] is whatever the caller typed: invoked through `PATH` it is
+        /// the bare word `sitrep`, which resolves against the *current
+        /// directory* and sent this looking for the daemon inside whatever
+        /// project the user happened to be standing in. It only appeared to work
+        /// when invoked by absolute path.
+        ///
+        /// Symlinks are resolved because a Homebrew-style symlinked `sitrep`
+        /// would otherwise point the plist at a directory with no daemon in it.
         static func siblingDaemonPath() throws -> String {
-            let executable = URL(fileURLWithPath: CommandLine.arguments[0])
+            guard let executable = DaemonPaths.runningExecutablePath() else {
+                throw ValidationError(
+                    "could not determine where sitrep is installed. "
+                        + "Pass --executable with the path to sitrepd."
+                )
+            }
+
+            let candidate = URL(fileURLWithPath: executable)
                 .resolvingSymlinksInPath()
-            let candidate = executable.deletingLastPathComponent()
+                .deletingLastPathComponent()
                 .appendingPathComponent("sitrepd").path
 
             guard FileManager.default.isExecutableFile(atPath: candidate) else {
                 throw ValidationError(
-                    "could not find sitrepd next to sitrep (looked at \(candidate)). "
-                        + "Pass --executable with its path."
+                    """
+                    no sitrepd next to sitrep (looked at \(candidate)).
+                    Both binaries need to live in the same directory. Either:
+                      install -m 755 .build/release/sitrepd \(
+                        URL(fileURLWithPath: executable).deletingLastPathComponent().path
+                      )/
+                    or pass --executable with its path.
+                    """
                 )
             }
             return candidate
         }
+
     }
 
     struct Uninstall: ParsableCommand {
@@ -117,6 +138,13 @@ extension Daemon {
             }
 
             print("collector   \(status.summary)")
+            if let running = Self.runningDaemonVersion() {
+                let skewed = running != SitrepVersion.current
+                print("version     \(running)"
+                    + (skewed
+                        ? "  ⚠️  cli is \(SitrepVersion.current) — run 'sitrep daemon install'"
+                        : ""))
+            }
             print("history     \(DaemonPaths.databasePath)")
             print("size        \(Format.bytes(Self.databaseSize()))")
 
@@ -139,6 +167,22 @@ extension Daemon {
                 print("")
                 print("No self-measurement recorded yet.")
             }
+        }
+
+        /// Version of the daemon that last started, from its own start event.
+        ///
+        /// Replacing the binary on disk does not restart a running daemon, so
+        /// the CLI and collector can drift apart silently. Surfacing it here is
+        /// the only place that skew becomes visible.
+        static func runningDaemonVersion() -> String? {
+            guard let store = try? SampleStore.openReadOnly(path: DaemonPaths.databasePath),
+                  let events = try? store.events(since: Date().addingTimeInterval(-90 * 86_400))
+            else { return nil }
+
+            return events
+                .last { $0.kind == "daemon_start" }?
+                .detail?
+                .replacingOccurrences(of: "sitrepd ", with: "")
         }
 
         static func databaseSize() -> UInt64 {
