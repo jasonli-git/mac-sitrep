@@ -3,6 +3,28 @@
 All notable changes to mac-sitrep. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.1.2] — 2026-08-28
+
+### Fixed
+
+- **On a project with two scenarios, `export`, `compare`, and `can-i-run`
+  defaulted to whichever scenario was profiled most recently**, while
+  `sitrep run` defaulted to the config's first scenario. The publishing path is
+  where it bit: after profiling a secondary scenario, a bare
+  `export --inject README.md --check` failed against the wrong artifact and its
+  suggested remedy would have overwritten the published block with that wrong
+  scenario's numbers — a drift gate whose fix causes the drift it reports. All
+  commands now share one rule: the config's first scenario is the default;
+  without a config, the sole profiled scenario; two scenarios with no config are
+  refused with the list rather than guessed at (ARCHITECTURE #48). Found by
+  dogfooding on the first project to carry two scenarios.
+- `--check`'s failure message now names the scenario in the command it suggests
+  (`sitrep export --scenario <name> --inject <file>`), so the remedy is exact
+  even when the check targeted a non-default scenario.
+- `compare` resolves the scenario once for both sides, so a two-scenario
+  project can no longer silently diff one scenario's baseline against the
+  other's candidate.
+
 ## [1.1.1] — 2026-08-27
 
 ### Fixed

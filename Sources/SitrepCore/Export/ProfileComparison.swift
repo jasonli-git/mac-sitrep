@@ -220,6 +220,54 @@ extension Profile {
         return profiles.first { $0.scenario == scenario }
     }
 
+    /// The scenario a command should use when the caller named none.
+    ///
+    /// `sitrep run` defaults to the config's *first* scenario; the
+    /// artifact-reading commands (`export`, `compare`, `can-i-run`) must agree,
+    /// or the same project answers differently depending on which scenario
+    /// happened to be profiled most recently. That disagreement is not
+    /// cosmetic: `export --check`'s suggested remedy would overwrite the
+    /// published block with whichever scenario was measured last.
+    ///
+    /// Resolution order: the config's first scenario when a config for this
+    /// project exists; else the only scenario present in the artifacts; else
+    /// refuse and name the choices rather than guess. `nil` means no artifacts
+    /// exist at all, which callers already report as their own error.
+    public static func defaultScenario(
+        in directory: String, project: String
+    ) throws -> String? {
+        if let config = try? ProjectConfig.load(from: directory),
+           config.project == project,
+           let first = config.scenarios.first {
+            return first.name
+        }
+
+        var seen: Set<String> = []
+        var scenarios: [String] = []
+        for profile in try all(in: directory, project: project)
+        where seen.insert(profile.scenario).inserted {
+            scenarios.append(profile.scenario)
+        }
+
+        guard scenarios.count > 1 else { return scenarios.first }
+        throw DiscoveryError.ambiguousScenario(
+            project: project, scenarios: scenarios.sorted()
+        )
+    }
+
+    public enum DiscoveryError: Error, CustomStringConvertible {
+        case ambiguousScenario(project: String, scenarios: [String])
+
+        public var description: String {
+            switch self {
+            case let .ambiguousScenario(project, scenarios):
+                "\(project) has profiles for more than one scenario and no config "
+                    + "to pick a default — pass --scenario "
+                    + "(\(scenarios.joined(separator: ", ")))"
+            }
+        }
+    }
+
     /// Finds an artifact by version label.
     public static func matching(
         version: String, in directory: String, project: String, scenario: String? = nil

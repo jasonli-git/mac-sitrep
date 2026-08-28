@@ -83,6 +83,7 @@ never a participant in the sampling path, so it can be absent entirely.
 | 45 | Threshold scales are validated against real workloads, not reasoned about | The first pass put the light/moderate boundary at a flat 10% of the machine, which looked defensible and reported a core pinned solid for two seconds on a 10-core Mac as *Light*. Running an actual CPU-bound workload through the scale is what surfaced it. The boundary now sits near "occupies one whole core" — 10% on a ten-core machine, 25% on a four-core one. Any future classifier (incident severity, cost bands) gets the same treatment before it ships. |
 | 46 | The running binary is located with `_NSGetExecutablePath`, never `argv[0]` | `argv[0]` is whatever the caller typed. Invoked through `PATH` it is the bare word `sitrep`, which resolves against the *current directory* — so `daemon install` looked for `sitrepd` inside whatever project the user happened to be standing in and failed for everyone who did not invoke it by absolute path. It passed every test and every manual check, because both had used a full path. `_NSGetExecutablePath` returns the real path regardless of invocation. |
 | 47 | `daemon status` reports the running daemon's version, from its own start event | Replacing the binary on disk does not restart a running daemon, so the CLI and collector drift apart silently — the confusion that surfaced #46. The daemon stamps its version into a `daemon_start` event, so the CLI can read it back and flag a mismatch. Known rough edge: for a second or two after install the last recorded event is still the previous daemon's, so a fresh install can briefly warn about skew that no longer exists. Self-correcting, and the remedy it suggests is idempotent. |
+| 48 | The default scenario is the config's first scenario everywhere; without a config it is the sole profiled scenario, and two scenarios with no config refuse with the list rather than guess | `sitrep run` already defaulted to config order, but `export`, `compare`, and `can-i-run` took the newest artifact by `generatedAt` — so profiling a secondary scenario silently changed what a bare `export --inject` would publish. Worse, `--check`'s failure message recommended the exact command that would overwrite the published block with the wrong scenario: a drift gate whose remedy causes the drift it reports. Found by dogfooding on a two-scenario project the day it got its second scenario. Recency was rejected as a default because it makes publishing depend on measurement order, which nothing else in the tool does; requiring `--scenario` always was rejected as punishing the common single-scenario project. The remedy message now names the scenario explicitly, so the suggested command is precise even when the check was run against a non-default scenario. `Profile.defaultScenario` is the one implementation; any future scenario-consuming command goes through it. |
 
 ## Module Layout
 
@@ -158,7 +159,7 @@ Tests/
     ExportTests.swift               # rendering, injection, badge, compare, fit
 ```
 
-164 tests across twenty-six suites.
+169 tests across twenty-seven suites.
 
 **Dependency rule.** `SitrepCore` imports only Darwin, Foundation, and IOKit —
 never `ArgumentParser`, never CLI concerns. Executable targets depend on

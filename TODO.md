@@ -378,6 +378,64 @@ truth (ARCHITECTURE #7).
 - Note: still no `sitrep watch`, and `pmset -g log` sleep/wake parsing remains
   unbuilt from Milestone 3. Both carried into post-v1.
 
+## Found by dogfooding on other projects
+
+Filed 2026-08-28 while profiling `housing-intelligence`. Neither is scheduled;
+both belong to a milestone from [ROADMAP.md](ROADMAP.md) when one is started.
+
+- **Peak CPU above 100% should switch denominators.** A multi-process workload
+  rendered as `peak CPU 846.5% of one core, per 50 ms window`, which is correct
+  and nearly unreadable — it means the pipeline saturates about 8.5 cores. The
+  "of one core" denominator was added in 1.0.2 precisely to stop a small number
+  reading as heavy (ARCHITECTURE #43), and it works below 100%; above it the same
+  phrasing forces the reader to divide. Suggested fix: render `8.5 cores` past
+  100% and keep the percentage below it. This is the same class of defect as the
+  original "Peak CPU 31%" — the figure was right and the presentation misled — so
+  it wants the #45 treatment of being checked against a real workload rather than
+  reasoned about. Belongs with any render-layer work; no milestone depends on it.
+- **Short cache-sensitive workloads defeat the median.** `make lint` measured
+  81 MB on the first run and ~1.1 MB on the next four, because mypy's incremental
+  cache turns repeat runs into near no-ops; the published median of 13 MB
+  understated a cold run by ~70×. Both existing guards fired — the 597% stability
+  warning and the contention flag — so nothing is *wrong*, but they diagnose
+  rather than prevent, and more runs make it worse instead of better by adding
+  more warm samples. The 0.251 s wall clock also sat at the documented floor of
+  ARCHITECTURE #29. Worth considering whether a run whose *first* sample is a
+  large outlier against the rest should be reported as cold-vs-warm rather than
+  averaged, since "first run does the work" is the normal shape for any cached
+  toolchain, not an anomaly. Related to the page-cache caveat already recorded
+  for `compare` disk reads.
+- **"Default scenario" means two different things.** With no `--scenario`,
+  `sitrep run` takes `scenarios.first` from the config
+  (`ProjectConfig.scenario(named:)`), while `export`, `compare`, and `can-i-run`
+  take the newest artifact by `generatedAt`
+  (`ProfileComparison.all` sorts descending, `latest` returns `.first`). On a
+  project whose config lists `pipeline` first, `can-i-run` reported `test`
+  simply because it had been profiled more recently. Each rule is defensible
+  alone, but the disagreement is undocumented and the publishing path is where
+  it bites: `sitrep export --inject README.md` without an explicit `--scenario`
+  publishes whichever scenario was profiled last, so a project can silently
+  ship the wrong requirements block. **Worse, the failure recommends itself.**
+  On a README carrying a `pipeline` block, a bare `--check` after profiling a
+  different scenario exits 1 with "README.md is out of date with
+  `v0.9.0-test.json`. Run: sitrep export --inject README.md" — and following
+  that instruction overwrites the pipeline requirements with the test ones.
+  A drift gate whose remedy causes the drift it reports is worse than no gate,
+  and this is reachable by any project with two scenarios. Reproduced on
+  housing-intelligence 2026-08-28: `--scenario pipeline --check` exits 0 against
+  the same README in the same state. Options are to make artifact-reading
+  commands honour config order, or to require `--scenario` when a project has
+  more than one. Either way it needs deciding before multi-scenario publishing
+  (the "one block per marker" limitation in ARCHITECTURE) is addressed, since
+  both touch the same selection rule.
+  **Resolved 2026-08-28 in 1.1.2** (ARCHITECTURE #48): config order governs
+  everywhere, a config-less project with one profiled scenario uses it, two
+  scenarios with no config refuse with the list, and the `--check` remedy names
+  its scenario. Verified against the reproducing project — a bare `--check` now
+  exits 0 where it had recommended overwriting the block. Multi-scenario
+  *publishing* (several blocks in one file) remains unscheduled in ROADMAP;
+  `Profile.defaultScenario` is the selection rule it must reuse.
+
 ## Parked / needs user input
 
 - Full Xcode is not installed, so `swift test` depends on the vendored

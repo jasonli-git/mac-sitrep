@@ -24,15 +24,16 @@ private func makeProfile(
     version: String = "v1", runs: [RunResult] = [makeRun()],
     externalServices: [String] = [], capabilityGaps: [String] = [],
     contended: Bool = false, thermal: ThermalState = .nominal,
-    swapOuts: Double = 0, machine: Machine? = nil
+    swapOuts: Double = 0, machine: Machine? = nil,
+    // Fixed date so rendering is deterministic — the whole point of the
+    // block being stable is that it must not depend on when it was rendered.
+    generatedAt: Date = Date(timeIntervalSince1970: 1_780_000_000)
 ) -> Profile {
     Profile(
         schemaVersion: Profile.schemaVersion,
         project: project, scenario: scenario, command: ["echo", "hi"],
         version: version,
-        // Fixed date so rendering is deterministic — the whole point of the
-        // block being stable is that it must not depend on when it was rendered.
-        generatedAt: Date(timeIntervalSince1970: 1_780_000_000),
+        generatedAt: generatedAt,
         machine: machine ?? .current(),
         toolVersion: "9.9.9", runs: runs,
         peakRAMBytes: Statistic(runs.map { Double($0.totalPeakRAMBytes) }),
@@ -580,25 +581,10 @@ struct ArtifactDiscoveryTests {
         // Distinct generatedAt values; write order is deliberately reversed to
         // prove ordering comes from the artifact, not the filesystem.
         for (offset, version) in [(0.0, "v1"), (100.0, "v2")] {
-            var profile = makeProfile(version: version)
-            profile = Profile(
-                schemaVersion: profile.schemaVersion, project: profile.project,
-                scenario: profile.scenario, command: profile.command,
+            _ = try makeProfile(
                 version: version,
-                generatedAt: Date(timeIntervalSince1970: 1_780_000_000 + offset),
-                machine: profile.machine, toolVersion: profile.toolVersion,
-                runs: profile.runs, peakRAMBytes: profile.peakRAMBytes,
-                ownPeakRAMBytes: profile.ownPeakRAMBytes,
-                externalPeakRAMBytes: profile.externalPeakRAMBytes,
-                peakCPU: profile.peakCPU, cpuSeconds: profile.cpuSeconds,
-                wallClockSeconds: profile.wallClockSeconds,
-                diskReadBytes: profile.diskReadBytes,
-                diskWrittenBytes: profile.diskWrittenBytes,
-                conditions: profile.conditions, overhead: profile.overhead,
-                externalServices: profile.externalServices,
-                capabilityGaps: profile.capabilityGaps
-            )
-            _ = try profile.write(to: directory)
+                generatedAt: Date(timeIntervalSince1970: 1_780_000_000 + offset)
+            ).write(to: directory)
         }
 
         let all = try Profile.all(in: directory, project: "demo")
@@ -617,5 +603,95 @@ struct ArtifactDiscoveryTests {
         #expect(try Profile.all(in: "/nonexistent", project: "demo").isEmpty)
         #expect(try Profile.latest(in: "/nonexistent", project: "demo") == nil)
         #expect(Profile.knownProjects(in: "/nonexistent").isEmpty)
+    }
+}
+
+@Suite("Default scenario resolution")
+struct DefaultScenarioTests {
+
+    private func makeDirectory() -> String {
+        let directory = NSTemporaryDirectory() + "sitrep-scen-\(UUID().uuidString)"
+        return directory
+    }
+
+    /// The bug this suite pins: `sitrep run` defaulted to the config's first
+    /// scenario while `export`/`can-i-run` took the newest artifact, so
+    /// profiling a secondary scenario silently changed what a bare
+    /// `export --inject` would publish.
+    @Test("Config order beats artifact recency")
+    func configOrderBeatsRecency() throws {
+        let directory = makeDirectory()
+        defer { try? FileManager.default.removeItem(atPath: directory) }
+
+        try ProjectConfig(
+            project: "demo",
+            scenarios: [
+                .init(name: "pipeline", command: ["make", "pipeline"]),
+                .init(name: "test", command: ["make", "test"]),
+            ]
+        ).write(to: directory)
+
+        // The non-default scenario is profiled *last* — the recency rule
+        // would pick it.
+        _ = try makeProfile(
+            scenario: "pipeline",
+            generatedAt: Date(timeIntervalSince1970: 1_780_000_000)
+        ).write(to: directory)
+        _ = try makeProfile(
+            scenario: "test",
+            generatedAt: Date(timeIntervalSince1970: 1_780_000_100)
+        ).write(to: directory)
+
+        let scenario = try Profile.defaultScenario(in: directory, project: "demo")
+        #expect(scenario == "pipeline")
+        #expect(
+            try Profile.latest(in: directory, project: "demo", scenario: scenario)?
+                .scenario == "pipeline"
+        )
+    }
+
+    @Test("Without a config, a single profiled scenario is the default")
+    func soleScenarioIsDefault() throws {
+        let directory = makeDirectory()
+        defer { try? FileManager.default.removeItem(atPath: directory) }
+
+        _ = try makeProfile(scenario: "pipeline").write(to: directory)
+
+        #expect(try Profile.defaultScenario(in: directory, project: "demo") == "pipeline")
+    }
+
+    @Test("Without a config, two scenarios refuse rather than guess")
+    func ambiguityRefusesRatherThanGuesses() throws {
+        let directory = makeDirectory()
+        defer { try? FileManager.default.removeItem(atPath: directory) }
+
+        _ = try makeProfile(scenario: "pipeline").write(to: directory)
+        _ = try makeProfile(
+            scenario: "test",
+            generatedAt: Date(timeIntervalSince1970: 1_780_000_100)
+        ).write(to: directory)
+
+        #expect(throws: Profile.DiscoveryError.self) {
+            try Profile.defaultScenario(in: directory, project: "demo")
+        }
+    }
+
+    @Test("A config for a different project does not govern")
+    func foreignConfigDoesNotGovern() throws {
+        let directory = makeDirectory()
+        defer { try? FileManager.default.removeItem(atPath: directory) }
+
+        try ProjectConfig(
+            project: "other",
+            scenarios: [.init(name: "build", command: ["make"])]
+        ).write(to: directory)
+        _ = try makeProfile(project: "demo", scenario: "pipeline").write(to: directory)
+
+        #expect(try Profile.defaultScenario(in: directory, project: "demo") == "pipeline")
+    }
+
+    @Test("No artifacts and no config resolve to nil, not an error")
+    func nothingResolvesToNil() throws {
+        #expect(try Profile.defaultScenario(in: "/nonexistent", project: "demo") == nil)
     }
 }

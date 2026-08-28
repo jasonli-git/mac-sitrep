@@ -28,7 +28,7 @@ struct Export: ParsableCommand {
     @Option(name: .long, help: "Project directory.")
     var directory: String = FileManager.default.currentDirectoryPath
 
-    @Option(name: .long, help: "Scenario to publish. Defaults to the most recent.")
+    @Option(name: .long, help: "Scenario to publish. Defaults to the config's first scenario.")
     var scenario: String?
 
     // See RunCommand: --version would shadow the built-in flag.
@@ -75,7 +75,7 @@ struct Export: ParsableCommand {
                         \(inject) is out of date with \
                         .sitrep/profiles/\(profile.project)/\(profile.version)-\
                         \(profile.scenario).json
-                        Run: sitrep export --inject \(inject)
+                        Run: sitrep export --scenario \(profile.scenario) --inject \(inject)
 
                         """.utf8
                     )
@@ -94,6 +94,9 @@ struct Export: ParsableCommand {
     ///
     /// Resolving the project name from config when it is omitted means the
     /// common case inside a project directory needs no arguments at all.
+    /// An omitted scenario resolves through `Profile.defaultScenario`, the
+    /// same rule `sitrep run` uses — never "whichever was profiled last",
+    /// which would let a `--check` remedy overwrite the wrong block.
     static func resolveProfile(
         directory: String, project: String?, scenario: String?, version: String?
     ) throws -> Profile {
@@ -110,6 +113,9 @@ struct Export: ParsableCommand {
                     : "name a project: \(known.joined(separator: ", "))"
             )
         }
+
+        let scenario = try scenario
+            ?? Profile.defaultScenario(in: directory, project: name)
 
         if let version {
             guard let profile = try Profile.matching(
@@ -164,6 +170,12 @@ struct Compare: ParsableCommand {
     func run() throws {
         let name = try project
             ?? ProjectConfig.load(from: directory).project
+
+        // Resolved once so both sides compare the same scenario. Left to the
+        // per-version match, a project with two scenarios could silently diff
+        // pipeline-at-v1 against test-at-v2.
+        let scenario = try scenario
+            ?? Profile.defaultScenario(in: directory, project: name)
 
         guard let before = try Profile.matching(
             version: baseline, in: directory, project: name, scenario: scenario
@@ -258,6 +270,9 @@ struct CanIRun: ParsableCommand {
 
     func run() throws {
         let name = try project ?? ProjectConfig.load(from: directory).project
+
+        let scenario = try scenario
+            ?? Profile.defaultScenario(in: directory, project: name)
 
         guard let profile = try Profile.latest(
             in: directory, project: name, scenario: scenario
